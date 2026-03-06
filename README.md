@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./public/readme/mission-control-hero.svg" alt="OpenClaw Mission Control hero banner" width="100%" />
+  <img src="./public/readme/agentos-core.webp" alt="OpenClaw Mission Control main preview" width="100%" />
 </div>
 
 <div align="center">
