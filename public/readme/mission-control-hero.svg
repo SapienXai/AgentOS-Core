@@ -1,0 +1,265 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OpenClaw Mission Control hero banner</title>
+  <desc id="desc">A stylized control surface showing workspaces, agents, runtimes, diagnostics, and a mission command bar.</desc>
+  <defs>
+    <linearGradient id="bg" x1="160" y1="80" x2="1460" y2="860" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071120"/>
+      <stop offset="0.55" stop-color="#09172B"/>
+      <stop offset="1" stop-color="#040913"/>
+    </linearGradient>
+    <radialGradient id="glowLeft" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(280 176) rotate(49.112) scale(478 395)">
+      <stop stop-color="#2258F4" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#2258F4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowRight" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1288 170) rotate(131.381) scale(432 336)">
+      <stop stop-color="#16C6FF" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#16C6FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#0D1627" stop-opacity="0.94"/>
+      <stop offset="1" stop-color="#08101D" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="panelSoft" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#111C32" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#09111E" stop-opacity="0.92"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#57D0FF"/>
+      <stop offset="1" stop-color="#2E76FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-80" y="-80" width="1760" height="1060" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="36" flood-color="#01050D" flood-opacity="0.5"/>
+    </filter>
+    <filter id="softGlow" x="-120" y="-120" width="1840" height="1140" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="22" flood-color="#38BDF8" flood-opacity="0.18"/>
+    </filter>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#94A3B8" stroke-opacity="0.12" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="900" rx="40" fill="url(#bg)"/>
+  <rect width="1600" height="900" rx="40" fill="url(#grid)"/>
+  <rect width="1600" height="900" rx="40" fill="url(#glowLeft)"/>
+  <rect width="1600" height="900" rx="40" fill="url(#glowRight)"/>
+
+  <g opacity="0.28">
+    <circle cx="208" cy="734" r="164" fill="#0F2748"/>
+    <circle cx="1376" cy="742" r="196" fill="#061528"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="64" width="1484" height="772" rx="32" fill="#050A12" fill-opacity="0.2"/>
+  </g>
+
+  <text x="96" y="128" fill="#F5FAFF" font-size="54" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="-1.4">
+    OpenClaw Mission Control
+  </text>
+  <text x="96" y="174" fill="#91A7C6" font-size="24" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    Live workspaces, agents, sessions, diagnostics, and mission dispatch in one operator surface.
+  </text>
+
+  <g>
+    <rect x="1202" y="90" width="128" height="38" rx="19" fill="#0B1628" stroke="#204262"/>
+    <circle cx="1226" cy="109" r="6" fill="#4ADE80"/>
+    <text x="1240" y="115" fill="#D8FCEF" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+      LIVE SNAPSHOT
+    </text>
+    <rect x="1344" y="90" width="114" height="38" rx="19" fill="#0B1628" stroke="#204262"/>
+    <text x="1372" y="115" fill="#D6EFFF" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+      SSE READY
+    </text>
+  </g>
+
+  <g filter="url(#softGlow)">
+    <rect x="88" y="232" width="300" height="470" rx="28" fill="url(#panel)" stroke="#1A2A43"/>
+  </g>
+  <text x="122" y="282" fill="#7E95B3" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="3">
+    SIDEBAR
+  </text>
+  <text x="122" y="320" fill="#F5FAFF" font-size="28" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    Workspace control
+  </text>
+
+  <rect x="122" y="352" width="232" height="92" rx="22" fill="url(#panelSoft)" stroke="#20314B"/>
+  <text x="148" y="388" fill="#91A7C6" font-size="13" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    GATEWAY HEALTH
+  </text>
+  <text x="148" y="425" fill="#F5FAFF" font-size="30" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    healthy
+  </text>
+  <text x="275" y="425" fill="#7EDCB0" font-size="18" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    127.0.0.1:18789
+  </text>
+
+  <rect x="122" y="470" width="232" height="62" rx="18" fill="#0C1524" stroke="#1B2A42"/>
+  <text x="148" y="507" fill="#F5FAFF" font-size="20" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    agentos-core
+  </text>
+  <text x="302" y="507" fill="#7EDCB0" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    3 runs
+  </text>
+
+  <rect x="122" y="548" width="232" height="62" rx="18" fill="#0C1524" stroke="#1B2A42"/>
+  <text x="148" y="585" fill="#F5FAFF" font-size="20" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    launch-lane
+  </text>
+  <text x="295" y="585" fill="#93C5FD" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    4 agents
+  </text>
+
+  <rect x="122" y="626" width="232" height="46" rx="16" fill="#0A1321" stroke="#1A2840"/>
+  <text x="148" y="655" fill="#90A6C3" font-size="15" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="600">
+    Create workspace   Edit agent   Refresh
+  </text>
+
+  <g filter="url(#softGlow)">
+    <rect x="430" y="206" width="734" height="530" rx="30" fill="url(#panel)" stroke="#1B2B45"/>
+  </g>
+  <text x="470" y="258" fill="#7E95B3" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="3">
+    CANVAS
+  </text>
+  <text x="470" y="300" fill="#F5FAFF" font-size="30" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    Orchestration surface
+  </text>
+  <text x="470" y="332" fill="#91A7C6" font-size="18" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    Real workspace -> agent -> runtime topology derived from OpenClaw state
+  </text>
+
+  <rect x="470" y="372" width="250" height="300" rx="24" fill="#0D1728" stroke="#243753"/>
+  <text x="500" y="414" fill="#7E95B3" font-size="13" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    WORKSPACE
+  </text>
+  <text x="500" y="456" fill="#F5FAFF" font-size="30" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    agentos-core
+  </text>
+  <text x="500" y="492" fill="#91A7C6" font-size="18" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    4 agents - 6 active runs
+  </text>
+  <rect x="500" y="526" width="144" height="36" rx="18" fill="#10233B" stroke="#284360"/>
+  <text x="531" y="549" fill="#D6EFFF" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    workspace
+  </text>
+
+  <rect x="792" y="394" width="164" height="84" rx="22" fill="#101A2C" stroke="#26415F"/>
+  <text x="818" y="426" fill="#7E95B3" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    AGENT
+  </text>
+  <text x="818" y="458" fill="#F5FAFF" font-size="24" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    planner
+  </text>
+
+  <rect x="792" y="516" width="164" height="84" rx="22" fill="#101A2C" stroke="#26415F"/>
+  <text x="818" y="548" fill="#7E95B3" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    AGENT
+  </text>
+  <text x="818" y="580" fill="#F5FAFF" font-size="24" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    executor
+  </text>
+
+  <rect x="1010" y="364" width="112" height="82" rx="20" fill="#0F1A2B" stroke="#2E4B6C"/>
+  <text x="1032" y="396" fill="#7E95B3" font-size="11" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    RUNTIME
+  </text>
+  <text x="1032" y="426" fill="#F5FAFF" font-size="18" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    release
+  </text>
+
+  <rect x="1010" y="470" width="112" height="82" rx="20" fill="#0F1A2B" stroke="#2E4B6C"/>
+  <text x="1032" y="502" fill="#7E95B3" font-size="11" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    RUNTIME
+  </text>
+  <text x="1032" y="532" fill="#F5FAFF" font-size="18" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    audit
+  </text>
+
+  <rect x="1010" y="576" width="112" height="82" rx="20" fill="#0F1A2B" stroke="#2E4B6C"/>
+  <text x="1032" y="608" fill="#7E95B3" font-size="11" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    RUNTIME
+  </text>
+  <text x="1032" y="638" fill="#F5FAFF" font-size="18" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    sync
+  </text>
+
+  <path d="M720 520C754 520 754 436 792 436" stroke="url(#accent)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M720 520C754 520 754 558 792 558" stroke="url(#accent)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M956 436C982 436 982 405 1010 405" stroke="#5FD8FF" stroke-opacity="0.78" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M956 436C982 436 982 511 1010 511" stroke="#5FD8FF" stroke-opacity="0.62" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M956 558C982 558 982 617 1010 617" stroke="#5FD8FF" stroke-opacity="0.62" stroke-width="2.5" stroke-linecap="round"/>
+
+  <g filter="url(#softGlow)">
+    <rect x="1196" y="232" width="316" height="470" rx="28" fill="url(#panel)" stroke="#1A2A43"/>
+  </g>
+  <text x="1232" y="282" fill="#7E95B3" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="3">
+    INSPECTOR
+  </text>
+  <text x="1232" y="320" fill="#F5FAFF" font-size="28" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    Runtime detail
+  </text>
+
+  <rect x="1232" y="354" width="244" height="44" rx="18" fill="#0A1321" stroke="#1D2D46"/>
+  <text x="1260" y="382" fill="#D6EFFF" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    Overview
+  </text>
+  <text x="1356" y="382" fill="#7E95B3" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    Output
+  </text>
+  <text x="1430" y="382" fill="#7E95B3" font-size="14" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    Raw
+  </text>
+
+  <rect x="1232" y="424" width="244" height="110" rx="22" fill="#0D1728" stroke="#223551"/>
+  <text x="1258" y="458" fill="#7E95B3" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    SELECTED ENTITY
+  </text>
+  <text x="1258" y="494" fill="#F5FAFF" font-size="24" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    release runtime
+  </text>
+  <text x="1258" y="522" fill="#91A7C6" font-size="16" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    active - updated 38s ago - 12.4k tokens
+  </text>
+
+  <rect x="1232" y="556" width="244" height="112" rx="22" fill="#0D1728" stroke="#223551"/>
+  <text x="1258" y="590" fill="#7E95B3" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2">
+    OUTPUT
+  </text>
+  <text x="1258" y="626" fill="#DDEBFA" font-size="17" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    Drafted deployment checklist,
+  </text>
+  <text x="1258" y="651" fill="#DDEBFA" font-size="17" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    flagged flaky tests, and prepared
+  </text>
+  <text x="1258" y="676" fill="#DDEBFA" font-size="17" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    the next execution batch.
+  </text>
+
+  <g filter="url(#softGlow)">
+    <rect x="252" y="752" width="1096" height="96" rx="28" fill="url(#panel)" stroke="#1A2A43"/>
+  </g>
+  <text x="290" y="789" fill="#7E95B3" font-size="13" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="2.5">
+    MISSION INPUT
+  </text>
+  <rect x="290" y="804" width="126" height="28" rx="14" fill="#10233B" stroke="#294563"/>
+  <text x="317" y="822" fill="#D6EFFF" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    agentos-core
+  </text>
+  <rect x="430" y="804" width="100" height="28" rx="14" fill="#10233B" stroke="#294563"/>
+  <text x="461" y="822" fill="#D6EFFF" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    planner
+  </text>
+  <rect x="544" y="804" width="122" height="28" rx="14" fill="#10233B" stroke="#294563"/>
+  <text x="573" y="822" fill="#D6EFFF" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    thinking: high
+  </text>
+  <text x="698" y="823" fill="#90A6C3" font-size="15" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
+    Plan the next multi-agent release mission, assign validation, and summarize blockers.
+  </text>
+  <rect x="1234" y="785" width="78" height="32" rx="16" fill="#0B1628" stroke="#25506D"/>
+  <text x="1254" y="806" fill="#D8FCEF" font-size="12" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700">
+    refresh
+  </text>
+  <rect x="1328" y="780" width="164" height="42" rx="21" fill="url(#accent)"/>
+  <text x="1376" y="807" fill="#04111F" font-size="16" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="800">
+    Dispatch mission
+  </text>
+</svg>

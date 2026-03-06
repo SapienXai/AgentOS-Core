@@ -1,84 +1,183 @@
+<div align="center">
+  <img src="./public/readme/mission-control-hero.svg" alt="OpenClaw Mission Control hero banner" width="100%" />
+</div>
+
+<div align="center">
+
 # OpenClaw Mission Control
 
-Production-oriented mission-control UI for live OpenClaw systems, built from an empty folder with:
+**A production-grade control surface for live OpenClaw workspaces, agents, models, and runtimes.**
 
-- Next.js App Router
-- TypeScript
-- Tailwind CSS
-- shadcn/ui-style component primitives
-- React Flow
-- Motion for React
+Mission Control turns OpenClaw's real operational surface into a single UI for observation and action. It reads live gateway state, workspaces, agents, models, sessions, and transcript-backed runtime output, then lets operators dispatch missions and manage workspace state without leaving the console.
 
-The UI is not a detached dashboard. It reads and writes through real OpenClaw concepts:
+<p>
+  <img src="https://img.shields.io/badge/Next.js-15-0b1220?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js 15" />
+  <img src="https://img.shields.io/badge/React-19-07111d?style=for-the-badge&logo=react&logoColor=61dafb" alt="React 19" />
+  <img src="https://img.shields.io/badge/TypeScript-Strict-0f172a?style=for-the-badge&logo=typescript&logoColor=3178c6" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Tailwind-CSS-081a2b?style=for-the-badge&logo=tailwindcss&logoColor=38bdf8" alt="Tailwind CSS" />
+  <img src="https://img.shields.io/badge/React_Flow-Orchestration_Canvas-101828?style=for-the-badge&logo=react&logoColor=93c5fd" alt="React Flow orchestration canvas" />
+  <img src="https://img.shields.io/badge/OpenClaw-CLI--Backed-111827?style=for-the-badge" alt="OpenClaw CLI backed" />
+</p>
 
-- Workspaces are derived from configured OpenClaw workspace paths
-- Agents are read from `openclaw agents list` and `agents.list`
-- Models are read from `openclaw models list --json`
-- Runtime/task surfaces are derived from real OpenClaw sessions and gateway status
-- Mission dispatch writes through `openclaw agent`
-- Workspace creation writes through `openclaw agents add`
+<p>
+  <a href="#why-this-is-different"><strong>Why this is different</strong></a>
+  |
+  <a href="#core-capabilities"><strong>Core capabilities</strong></a>
+  |
+  <a href="#ui-tour"><strong>UI tour</strong></a>
+  |
+  <a href="#system-architecture"><strong>System architecture</strong></a>
+  |
+  <a href="#quick-start"><strong>Quick start</strong></a>
+  |
+  <a href="#live-data-sources"><strong>Live data sources</strong></a>
+  |
+  <a href="#api-surface"><strong>API surface</strong></a>
+</p>
 
-## What It Does
+</div>
 
-- Shows OpenClaw gateway health, presence, and diagnostics
-- Groups real workspaces/projects on an orchestration canvas
-- Renders custom nodes for:
-  - Workspace / Project
-  - Agent
-  - Model
-  - Task / Run / Session
-- Streams live snapshot updates over SSE
-- Provides a mission command bar that sends business goals to real OpenClaw agents
-- Supports creating a new OpenClaw workspace + default agent from the UI
-- Falls back to a clearly marked simulated snapshot only when OpenClaw is unavailable
+## Why This Is Different
 
-## Local OpenClaw Status In This Environment
+Most orchestration dashboards stop at observation. Mission Control is built to close the loop between **live state**, **runtime topology**, and **real OpenClaw actions**.
 
-During implementation, the local machine already had OpenClaw installed at `/opt/homebrew/bin/openclaw` with version `2026.3.2`.
+| See | Act |
+| --- | --- |
+| Gateway health, presence, version, and warnings | Dispatch missions through real `openclaw agent` runs |
+| Workspace -> agent -> runtime relationships | Create, rename, move, and delete workspaces |
+| Session-derived runtime cards | Create and update agents from the UI |
+| Transcript-backed runtime output | Reply to or copy prompts from live runtimes |
+| Real model inventory and usage | Refresh and inspect current operational state without reloading |
 
-Verified on March 6, 2026:
+## Core Capabilities
 
-- CLI present and working
-- Gateway service repaired and reinstalled into `launchd`
-- Gateway running on `ws://127.0.0.1:18789`
-- Dashboard responding on `http://127.0.0.1:18789/`
-- Agent turn verified end-to-end via `openclaw agent`
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Live topology canvas</h3>
+      <p>React Flow renders real workspace, agent, and runtime relationships with fit-to-view behavior, node selection, and runtime emphasis for the active workspace.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Command-first mission dispatch</h3>
+      <p>The mission bar submits directly to <code>openclaw agent</code>, supports thinking levels, and shows optimistic runtime creation while the run is being synchronized.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Operator-grade inspection</h3>
+      <p>The inspector exposes entity overviews, raw JSON payloads, and transcript-derived runtime output so active runs can be debugged without leaving the shell.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Real workspace lifecycle</h3>
+      <p>Workspace creation, rename, move, and deletion are backed by filesystem operations plus OpenClaw agent/config updates rather than front-end-only mocks.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Agent management</h3>
+      <p>Create and update agents, change models, and attach identity metadata from the sidebar while staying grounded in the active workspace.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Streaming updates with fallback</h3>
+      <p>State refreshes over Server-Sent Events. If OpenClaw is unavailable, the UI falls back to a clearly marked demo snapshot instead of pretending live state exists.</p>
+    </td>
+  </tr>
+</table>
 
-## Run It
+## UI Tour
 
-1. Install dependencies:
+| Surface | Purpose |
+| --- | --- |
+| `MissionSidebar` | Gateway diagnostics, workspace navigation, agents, models, and CRUD flows for workspaces and agents |
+| `MissionCanvas` | Workspace -> agent -> runtime topology with selection, pending mission feedback, and runtime-level actions |
+| `InspectorPanel` | Selected entity overview, runtime output, and raw payload inspection |
+| `CommandBar` | Mission composition, target agent selection, thinking level selection, refresh, and workspace creation |
+
+## System Architecture
+
+```mermaid
+flowchart LR
+    UI["Mission Control UI<br/>Sidebar / Canvas / Inspector / Command Bar"] --> API["Next.js App Router + API routes"]
+    API --> SERVICE["OpenClaw service adapter<br/>snapshot normalization + write actions"]
+    SERVICE --> CLI["openclaw CLI"]
+    CLI --> GATEWAY["Gateway status + RPC presence"]
+    CLI --> CONFIG["Agent config + workspace paths"]
+    CLI --> SESSIONS["Sessions + transcript files"]
+    API --> STREAM["SSE snapshot stream"]
+    STREAM --> UI
+```
+
+### Repository Map
+
+```text
+app/
+  api/
+    agents/route.ts
+    diagnostics/route.ts
+    mission/route.ts
+    runtimes/[runtimeId]/route.ts
+    snapshot/route.ts
+    stream/route.ts
+    workspaces/route.ts
+  layout.tsx
+  page.tsx
+
+components/mission-control/
+  command-bar.tsx
+  canvas.tsx
+  inspector-panel.tsx
+  mission-control-shell.tsx
+  sidebar.tsx
+  nodes/
+
+hooks/
+  use-mission-control-data.ts
+
+lib/openclaw/
+  cli.ts
+  fallback.ts
+  presenters.ts
+  service.ts
+  types.ts
+```
+
+## Quick Start
+
+### Prerequisites
+
+- A recent Node.js runtime
+- `pnpm`
+- OpenClaw installed locally and reachable on `PATH`
+
+If OpenClaw is installed in a non-standard location, point the app at it:
+
+```bash
+export OPENCLAW_BIN=/absolute/path/to/openclaw
+```
+
+### Install and run
 
 ```bash
 pnpm install
-```
-
-2. Make sure OpenClaw is available locally:
-
-```bash
 openclaw --version
-openclaw gateway status
+openclaw gateway status --json
+pnpm dev
 ```
 
-3. If the gateway is missing or not loaded:
+If the gateway is missing or not loaded:
 
 ```bash
 openclaw gateway install --force --json
 openclaw gateway status --json
 ```
 
-4. Start the frontend:
-
-```bash
-pnpm dev
-```
-
-5. Open:
+Open the local URL printed by Next.js. In a typical setup that will be:
 
 ```text
 http://localhost:3000
 ```
 
-## Quality Checks
+### Quality checks
 
 ```bash
 pnpm typecheck
@@ -86,67 +185,55 @@ pnpm lint
 pnpm build
 ```
 
-## Architecture
+## Live Data Sources
 
-### App shell
+Mission Control derives its live snapshot from real OpenClaw surfaces instead of hard-coded dashboard fixtures.
 
-- `app/page.tsx`
-  Loads the initial OpenClaw snapshot server-side.
-- `components/mission-control/mission-control-shell.tsx`
-  Composes sidebar, mission bar, canvas, and inspector.
+| Source | Used for |
+| --- | --- |
+| `openclaw gateway status --json` | Gateway bind mode, port, service load state, RPC health, probe URL |
+| `openclaw status --json` | Version, update channel, security findings, recent sessions, heartbeat metadata |
+| `openclaw agents list --json` | Agent identity, workspace mapping, bindings, defaults |
+| `openclaw config get agents.list --json` | Agent skills, configured tools, identity metadata, workspace config |
+| `openclaw models list --json` | Available models, provider metadata, context windows, tags |
+| `openclaw sessions --all-agents --json` | Runtime/session cards, token usage, model/provider linkage, timestamps |
+| `openclaw gateway call system-presence --json` | Presence diagnostics and host visibility |
+| Local transcript files | Turn-level runtime output, final text, stop reason, and message history |
 
-### OpenClaw adapter
+## API Surface
 
-- `lib/openclaw/cli.ts`
-  Safe command runner + JSON extraction for noisy CLI output.
-- `lib/openclaw/service.ts`
-  Normalizes real OpenClaw state into a single frontend domain snapshot.
-- `lib/openclaw/types.ts`
-  Shared domain model for workspaces, agents, models, runtimes, and relationships.
-- `lib/openclaw/fallback.ts`
-  Fallback snapshot for temporary no-backend mode.
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/snapshot` | `GET` | Returns the normalized mission control snapshot |
+| `/api/stream` | `GET` | Streams snapshot updates over SSE |
+| `/api/diagnostics` | `GET` | Returns gateway diagnostics and presence |
+| `/api/mission` | `POST` | Dispatches a mission to a real OpenClaw agent |
+| `/api/agents` | `GET`, `POST`, `PATCH` | Reads, creates, and updates agents |
+| `/api/workspaces` | `GET`, `POST`, `PATCH`, `DELETE` | Reads and mutates workspace projects |
+| `/api/runtimes/:runtimeId` | `GET` | Resolves transcript-backed runtime output for the selected run |
 
-### Transport layer
+## Fallback Behavior
 
-- `app/api/snapshot/route.ts`
-  Full normalized snapshot
-- `app/api/diagnostics/route.ts`
-  Gateway + presence diagnostics
-- `app/api/mission/route.ts`
-  Mission dispatch to `openclaw agent`
-- `app/api/workspaces/route.ts`
-  Workspace creation through `openclaw agents add`
-- `app/api/stream/route.ts`
-  SSE stream for live updates
+When OpenClaw cannot be reached, the app returns a structured fallback snapshot with demo workspaces, agents, models, and runtimes. The goal is to keep the interface explorable while making the offline state explicit. No fallback surface is presented as live control.
 
-### Presentation layer
+## Operational Notes
 
-- `components/mission-control/canvas.tsx`
-  React Flow orchestration graph
-- `components/mission-control/nodes/*`
-  Custom workspace, agent, runtime, and model nodes
-- `components/mission-control/sidebar.tsx`
-  Workspace navigation and diagnostics
-- `components/mission-control/command-bar.tsx`
-  Mission entry and workspace creation
-- `components/mission-control/inspector-panel.tsx`
-  Entity details and raw payload view
+- Initial state is loaded server-side in [`app/page.tsx`](./app/page.tsx) for a fast first render.
+- Client refresh uses `EventSource` in [`hooks/use-mission-control-data.ts`](./hooks/use-mission-control-data.ts).
+- JSON parsing in [`lib/openclaw/cli.ts`](./lib/openclaw/cli.ts) is defensive against noisy CLI output.
+- Runtime detail inspection is transcript-backed through [`lib/openclaw/service.ts`](./lib/openclaw/service.ts).
+- Mission dispatch, workspace mutation, and agent mutation all invalidate the snapshot cache and rehydrate live state.
 
-## Real Data Sources
+## Tech Stack
 
-The current snapshot builder reads from these real OpenClaw surfaces:
+- Next.js App Router
+- TypeScript
+- Tailwind CSS
+- shadcn/ui-style primitives
+- React Flow
+- Motion for React
+- Zod
 
-- `openclaw gateway status --json`
-- `openclaw status --json`
-- `openclaw agents list --json`
-- `openclaw config get agents.list --json`
-- `openclaw models list --json`
-- `openclaw sessions --all-agents --json`
-- `openclaw gateway call system-presence --json`
+## License
 
-## Notes
-
-- The mission bar dispatches to a real agent, not a frontend simulation.
-- Runtime nodes currently map to real OpenClaw session/task state.
-- If future gateway RPCs expose richer orchestration entities, the adapter layer is the place to swap those in without changing the canvas shell.
-- ESLint currently runs in legacy config mode because the shipped `eslint-config-next` export in this environment is still legacy-shaped under ESLint 9.
+This repository does not currently include a license file.
