@@ -70,12 +70,14 @@ type WorkspaceCreateDialogProps = {
   snapshot: MissionControlSnapshot;
   onRefresh: () => Promise<void>;
   onWorkspaceCreated: (workspaceId: string) => void;
+  trigger?: ReactNode;
 };
 
 export function WorkspaceCreateDialog({
   snapshot,
   onRefresh,
-  onWorkspaceCreated
+  onWorkspaceCreated,
+  trigger
 }: WorkspaceCreateDialogProps) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<WizardStepIndex>(0);
@@ -215,10 +217,12 @@ export function WorkspaceCreateDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="secondary" size="sm" className="h-7 rounded-full px-2 text-[11px]">
-          <Plus className="mr-1.5 h-3 w-3" />
-          Create workspace
-        </Button>
+        {trigger ?? (
+          <Button variant="secondary" size="sm" className="h-7 rounded-full px-2 text-[11px]">
+            <Plus className="mr-1.5 h-3 w-3" />
+            Create workspace
+          </Button>
+        )}
       </DialogTrigger>
 
       <DialogContent className="max-h-[86vh] max-w-5xl overflow-y-auto">

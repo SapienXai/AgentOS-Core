@@ -24,6 +24,8 @@ type ComposeIntent = {
   id: string;
   mission: string;
   agentId?: string;
+  sourceKind?: "copy" | "reply";
+  sourceLabel?: string;
 };
 
 type SurfaceTheme = "dark" | "light";
@@ -241,7 +243,9 @@ export function MissionControlShell({
                   setComposeIntent({
                     id: `reply:${runtime.id}:${Date.now()}`,
                     mission: resolveRuntimePrompt(runtime),
-                    agentId: runtime.agentId
+                    agentId: runtime.agentId,
+                    sourceKind: "reply",
+                    sourceLabel: runtime.title.trim() || runtime.subtitle.trim() || runtime.id
                   });
                 }}
                 onCopyRuntimePrompt={async (runtime) => {
@@ -249,7 +253,9 @@ export function MissionControlShell({
                   setComposeIntent({
                     id: `copy:${runtime.id}:${Date.now()}`,
                     mission: prompt,
-                    agentId: runtime.agentId
+                    agentId: runtime.agentId,
+                    sourceKind: "copy",
+                    sourceLabel: runtime.title.trim() || runtime.subtitle.trim() || runtime.id
                   });
 
                   try {

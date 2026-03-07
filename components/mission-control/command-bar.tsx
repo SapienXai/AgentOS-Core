@@ -1,12 +1,19 @@
 "use client";
 
-import { ChevronDown, Link2, LoaderCircle, Plus, RefreshCcw, SendHorizontal, SlidersHorizontal, Sparkles } from "lucide-react";
+import {
+  ChevronDown,
+  LoaderCircle,
+  Plus,
+  RefreshCcw,
+  SendHorizontal,
+  SlidersHorizontal,
+  X
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { WorkspaceCreateDialog } from "@/components/mission-control/workspace-create-dialog";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import type { MissionControlSnapshot, MissionResponse, MissionSubmission } from "@/lib/openclaw/types";
@@ -14,6 +21,42 @@ import { cn } from "@/lib/utils";
 
 type ThinkingLevel = NonNullable<MissionSubmission["thinking"]>;
 type AgentOption = { label: string; value: string };
+type ComposeIntent = {
+  id: string;
+  mission: string;
+  agentId?: string;
+  sourceKind?: "copy" | "reply";
+  sourceLabel?: string;
+};
+type ComposerSuggestion = {
+  id: string;
+  mission: string;
+  sourceKind: "copy" | "reply";
+  sourceLabel: string;
+};
+type DraftRecord = {
+  mission: string;
+  thinking: ThinkingLevel;
+};
+type RecentPrompt = {
+  id: string;
+  mission: string;
+  agentId: string;
+  agentName: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  submittedAt: number;
+};
+type InlineSuggestion = {
+  id: string;
+  label: string;
+  mission: string;
+  thinking?: ThinkingLevel;
+};
+
+const composerDraftStoragePrefix = "mission-control-composer-draft";
+const recentPromptsStorageKey = "mission-control-recent-prompts";
+const maxRecentPrompts = 6;
 
 export function CommandBar({
   snapshot,
@@ -29,11 +72,7 @@ export function CommandBar({
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
-  composeIntent: {
-    id: string;
-    mission: string;
-    agentId?: string;
-  } | null;
+  composeIntent: ComposeIntent | null;
   onRefresh: () => Promise<void>;
   onWorkspaceCreated: (workspaceId: string) => void;
   onMissionResponse: (result: MissionResponse) => void;
@@ -51,8 +90,15 @@ export function CommandBar({
   const [thinking, setThinking] = useState<ThinkingLevel>("medium");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [isComposerActive, setIsComposerActive] = useState(false);
+  const [recentPrompts, setRecentPrompts] = useState<RecentPrompt[]>([]);
+  const [composeSuggestion, setComposeSuggestion] = useState<ComposerSuggestion | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autoSelectionScopeRef = useRef<string | null>(null);
+  const handledComposeIntentIdRef = useRef<string | null>(null);
+  const skipDraftSaveRef = useRef(false);
+  const suspendDraftHydrationForScopeRef = useRef<string | null>(null);
 
   const targetWorkspace =
     snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? snapshot.workspaces[0];
@@ -61,10 +107,18 @@ export function CommandBar({
     targetWorkspace ? agent.workspaceId === targetWorkspace.id : true
   );
   const selectedAgent = availableAgents.find((agent) => agent.id === targetAgentId) ?? availableAgents[0] ?? null;
+  const effectiveTargetAgentId = selectedAgent?.id ?? null;
   const agentOptions: AgentOption[] = availableAgents.map((agent) => ({
     label: agent.name,
     value: agent.id
   }));
+  const draftScopeKey = buildDraftScopeKey(targetWorkspace?.id ?? activeWorkspaceId ?? null, effectiveTargetAgentId);
+  const canSubmit = Boolean(mission.trim() && effectiveTargetAgentId && !isSubmitting);
+  const dynamicPlaceholder = selectedAgent
+    ? `Message ${selectedAgent.name} with a clear next step...`
+    : "Select an agent to start a mission...";
+  const inlineSuggestions = buildInlineSuggestions(snapshot, selectedAgent, recentPrompts);
+  const showSuggestions = inlineSuggestions.length > 0;
 
   useEffect(() => {
     const selectionScope = `${activeWorkspaceId ?? "all"}:${selectedNodeId ?? "none"}:${availableAgents.map((agent) => agent.id).join(",")}`;
@@ -80,16 +134,96 @@ export function CommandBar({
     }
 
     if (!availableAgents.some((agent) => agent.id === targetAgentId)) {
-      setTargetAgentId(preferredAgent && availableAgents.some((agent) => agent.id === preferredAgent) ? preferredAgent : availableAgents[0]?.id ?? "");
+      setTargetAgentId(
+        preferredAgent && availableAgents.some((agent) => agent.id === preferredAgent)
+          ? preferredAgent
+          : availableAgents[0]?.id ?? ""
+      );
     }
   }, [snapshot, activeWorkspaceId, selectedNodeId, targetAgentId, availableAgents]);
+
+  useEffect(() => {
+    if (typeof globalThis.localStorage === "undefined") {
+      return;
+    }
+
+    setRecentPrompts(readRecentPrompts());
+  }, []);
+
+  useEffect(() => {
+    resizeTextarea(textareaRef.current);
+  }, [mission]);
+
+  useEffect(() => {
+    if (!draftScopeKey || typeof globalThis.localStorage === "undefined") {
+      return;
+    }
+
+    if (suspendDraftHydrationForScopeRef.current === draftScopeKey) {
+      suspendDraftHydrationForScopeRef.current = null;
+      return;
+    }
+
+    const storedDraft = readComposerDraft(draftScopeKey);
+    skipDraftSaveRef.current = true;
+    setMission(storedDraft?.mission ?? "");
+    setThinking(storedDraft?.thinking ?? "medium");
+    setComposeSuggestion(null);
+  }, [draftScopeKey]);
+
+  useEffect(() => {
+    if (!draftScopeKey || typeof globalThis.localStorage === "undefined") {
+      return;
+    }
+
+    if (skipDraftSaveRef.current) {
+      skipDraftSaveRef.current = false;
+      return;
+    }
+
+    writeComposerDraft(draftScopeKey, {
+      mission,
+      thinking
+    });
+  }, [draftScopeKey, mission, thinking]);
 
   useEffect(() => {
     if (!composeIntent) {
       return;
     }
 
-    setMission(composeIntent.mission);
+    if (handledComposeIntentIdRef.current === composeIntent.id) {
+      return;
+    }
+
+    handledComposeIntentIdRef.current = composeIntent.id;
+    const incomingMission = composeIntent.mission.trim();
+
+    if (!incomingMission) {
+      return;
+    }
+
+    const nextScopeKey = buildDraftScopeKey(
+      targetWorkspace?.id ?? activeWorkspaceId ?? null,
+      composeIntent.agentId ?? effectiveTargetAgentId
+    );
+
+    if (nextScopeKey) {
+      suspendDraftHydrationForScopeRef.current = nextScopeKey;
+    }
+
+    const shouldAutoApply = mission.trim().length === 0 || mission.trim() === incomingMission;
+
+    setComposeSuggestion({
+      id: composeIntent.id,
+      mission: incomingMission,
+      sourceKind: composeIntent.sourceKind ?? "copy",
+      sourceLabel: composeIntent.sourceLabel ?? "selected runtime"
+    });
+
+    if (shouldAutoApply) {
+      setMission(incomingMission);
+    }
 
     if (composeIntent.agentId) {
       setTargetAgentId(composeIntent.agentId);
@@ -97,9 +231,11 @@ export function CommandBar({
 
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(composeIntent.mission.length, composeIntent.mission.length);
+      if (shouldAutoApply) {
+        textareaRef.current?.setSelectionRange(incomingMission.length, incomingMission.length);
+      }
     });
-  }, [composeIntent]);
+  }, [composeIntent, mission, activeWorkspaceId, effectiveTargetAgentId, targetWorkspace?.id]);
 
   const handleTargetAgentChange = (value: string) => {
     setTargetAgentId(value);
@@ -107,7 +243,7 @@ export function CommandBar({
 
   const submitMission = async (payload: MissionSubmission) => {
     setIsSubmitting(true);
-    const resolvedAgentId = payload.agentId || selectedAgent?.id;
+    const resolvedAgentId = payload.agentId || effectiveTargetAgentId;
     const dispatchId = globalThis.crypto?.randomUUID?.() || `dispatch-${Date.now()}`;
     const submittedAt = Date.now();
 
@@ -122,6 +258,7 @@ export function CommandBar({
     }
 
     try {
+      const submittedMission = payload.mission.trim();
       const response = await fetch("/api/mission", {
         method: "POST",
         headers: {
@@ -139,6 +276,27 @@ export function CommandBar({
       onMissionResponse(result);
       onMissionDispatchComplete("success");
       setMission("");
+      setComposeSuggestion(null);
+      setIsAdvancedOpen(false);
+      skipDraftSaveRef.current = true;
+
+      if (draftScopeKey && typeof globalThis.localStorage !== "undefined") {
+        globalThis.localStorage.removeItem(draftScopeKey);
+      }
+
+      if (resolvedAgentId) {
+        const nextRecent = saveRecentPrompt({
+          id: globalThis.crypto?.randomUUID?.() || `${submittedAt}`,
+          mission: submittedMission,
+          agentId: resolvedAgentId,
+          agentName: selectedAgent?.name ?? "Agent",
+          workspaceId: targetWorkspace?.id ?? activeWorkspaceId,
+          workspaceName: targetWorkspace?.name ?? null,
+          submittedAt
+        });
+        setRecentPrompts(nextRecent);
+      }
+
       toast.success("Mission dispatched to OpenClaw.", {
         description:
           typeof result.meta?.outputDirRelative === "string"
@@ -156,137 +314,261 @@ export function CommandBar({
     }
   };
 
-  return (
-    <div className="panel-surface panel-glow rounded-[22px] border border-white/[0.08] bg-slate-950/72 px-2.5 py-2.5 shadow-[0_20px_58px_rgba(0,0,0,0.38)] backdrop-blur-2xl lg:rounded-[24px] lg:px-3 lg:py-2">
-      <div className="flex flex-col gap-2 lg:gap-1.5">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-[9px] uppercase tracking-[0.26em] text-slate-500">Mission input</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              {targetWorkspace ? <Badge variant="muted">{targetWorkspace.name}</Badge> : null}
-              {selectedAgent ? (
-                <AgentSelectorChip
-                  value={targetAgentId}
-                  options={agentOptions}
-                  onChange={handleTargetAgentChange}
-                />
-              ) : null}
-              <InlineSelectChip
-                ariaLabel="Select thinking level"
-                value={thinking}
-                options={[
-                  { label: "thinking off", value: "off" },
-                  { label: "thinking minimal", value: "minimal" },
-                  { label: "thinking low", value: "low" },
-                  { label: "thinking medium", value: "medium" },
-                  { label: "thinking high", value: "high" }
-                ]}
-                onChange={(value) => setThinking(value as ThinkingLevel)}
-                tone="neutral"
-              />
-            </div>
-          </div>
+  const applyMissionSnippet = (
+    snippet: string,
+    options: {
+      mode?: "append" | "replace";
+      thinking?: ThinkingLevel;
+    } = {}
+  ) => {
+    if (options.thinking) {
+      setThinking(options.thinking);
+    }
 
-          <div className="flex items-center gap-1.5 lg:shrink-0">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-7 rounded-full px-2 text-[11px]"
+    setMission((current) =>
+      options.mode === "replace" ? snippet : mergeMissionText(current, snippet)
+    );
+
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const nextText = textareaRef.current?.value ?? "";
+      textareaRef.current?.setSelectionRange(nextText.length, nextText.length);
+    });
+  };
+
+  const clearCurrentDraft = () => {
+    setMission("");
+    setThinking("medium");
+    setComposeSuggestion(null);
+    skipDraftSaveRef.current = true;
+
+    if (draftScopeKey && typeof globalThis.localStorage !== "undefined") {
+      globalThis.localStorage.removeItem(draftScopeKey);
+    }
+  };
+
+  return (
+    <div className="rounded-[30px] border border-white/[0.08] bg-[rgba(9,14,22,0.58)] p-3 shadow-[0_28px_80px_rgba(0,0,0,0.28)] backdrop-blur-[28px]">
+      <AnimatePresence initial={false}>
+        {composeSuggestion ? (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[12px] text-slate-400"
+          >
+            <span className="truncate">
+              From {composeSuggestion.sourceLabel}
+            </span>
+            <button
+              type="button"
+              className="text-slate-200 transition-colors hover:text-white"
+              onClick={() =>
+                applyMissionSnippet(composeSuggestion.mission, {
+                  mode: "replace"
+                })
+              }
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              className="text-slate-200 transition-colors hover:text-white"
+              onClick={() => applyMissionSnippet(composeSuggestion.mission)}
+            >
+              Append
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+              onClick={() => setComposeSuggestion(null)}
+              aria-label="Dismiss runtime suggestion"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <div
+        className={cn(
+          "rounded-[26px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] transition-all duration-200",
+          isComposerActive && "border-white/[0.14] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04))]"
+        )}
+        onFocusCapture={() => setIsComposerActive(true)}
+        onBlurCapture={(event) => {
+          const nextTarget = event.relatedTarget;
+          if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+            setIsComposerActive(false);
+          }
+        }}
+      >
+        <div className="flex items-center gap-2 px-3 pb-1 pt-3">
+          {selectedAgent ? (
+            <AgentSelectorChip
+              value={targetAgentId}
+              options={agentOptions}
+              onChange={handleTargetAgentChange}
+            />
+          ) : (
+            <SubtlePill>No agent</SubtlePill>
+          )}
+
+          <div className="ml-auto flex items-center gap-1">
+            <IconButton
+              label="Refresh mission control"
               onClick={async () => {
                 setIsRefreshing(true);
                 await onRefresh();
                 setIsRefreshing(false);
               }}
             >
-              {isRefreshing ? <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />}
-              Refresh
-            </Button>
+              {isRefreshing ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-3.5 w-3.5" />
+              )}
+            </IconButton>
 
             <WorkspaceCreateDialog
               snapshot={snapshot}
               onRefresh={onRefresh}
               onWorkspaceCreated={onWorkspaceCreated}
+              trigger={
+                <IconButton label="Create workspace">
+                  <Plus className="h-3.5 w-3.5" />
+                </IconButton>
+              }
             />
+
+            <IconButton
+              label="Composer settings"
+              onClick={() => setIsAdvancedOpen((current) => !current)}
+              active={isAdvancedOpen || thinking !== "medium"}
+            >
+              <span className="relative inline-flex">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {thinking !== "medium" ? (
+                  <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-white/80" />
+                ) : null}
+              </span>
+            </IconButton>
           </div>
         </div>
 
-        <div className="grid gap-1.5 lg:grid-cols-[minmax(0,1fr),138px]">
-          <div className="rounded-[16px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(15,23,42,0.88),rgba(9,15,27,0.92))] p-1.5 lg:rounded-[15px] lg:p-1">
-            <Textarea
-              ref={textareaRef}
-              value={mission}
-              onChange={(event) => setMission(event.target.value)}
-              placeholder="Enter your command..."
-              className="min-h-[34px] resize-none border-0 bg-transparent px-2 py-1.5 text-[12.5px] leading-5 text-white placeholder:text-slate-500 focus-visible:ring-0 focus-visible:ring-offset-0 lg:min-h-[28px] lg:px-1.5 lg:py-1 lg:text-[12px]"
-            />
-          </div>
+        <div className="px-3 pt-1">
+          <Textarea
+            ref={textareaRef}
+            value={mission}
+            onChange={(event) => setMission(event.target.value)}
+            onKeyDown={async (event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+
+                if (!canSubmit || !effectiveTargetAgentId) {
+                  return;
+                }
+
+                await submitMission({
+                  mission,
+                  agentId: effectiveTargetAgentId,
+                  workspaceId: activeWorkspaceId ?? undefined,
+                  thinking
+                });
+              }
+            }}
+            placeholder={dynamicPlaceholder}
+            className="min-h-[58px] max-h-[170px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-1 text-[15px] leading-[1.65] text-white placeholder:text-[#f6eee5]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+        </div>
+
+        <div className="flex items-end justify-between gap-3 px-3 pb-3 pt-2">
+          <AnimatePresence initial={false}>
+            {showSuggestions ? (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                className="flex min-w-0 flex-wrap items-center gap-1.5"
+              >
+                {inlineSuggestions.map((suggestion) => (
+                  <SuggestionChip
+                    key={suggestion.id}
+                    label={suggestion.label}
+                    onClick={() =>
+                      applyMissionSnippet(suggestion.mission, {
+                        thinking: suggestion.thinking
+                      })
+                    }
+                  />
+                ))}
+              </motion.div>
+            ) : (
+              <div />
+            )}
+          </AnimatePresence>
 
           <Button
-            className={cn(
-              "h-[50px] rounded-[16px] border border-cyan-200/20 bg-[linear-gradient(180deg,#3ea5ff_0%,#1464dd_100%)] text-white shadow-[0_14px_30px_rgba(20,100,221,0.34)] hover:brightness-110 lg:h-[44px]",
-              "flex-col items-start justify-center gap-0.5 px-3.5"
-            )}
-            disabled={isSubmitting || !mission.trim() || !targetAgentId}
+            className="h-10 rounded-full bg-white px-4 text-slate-950 shadow-none hover:bg-white/92"
+            disabled={!canSubmit}
             onClick={async () => {
+              if (!effectiveTargetAgentId) {
+                return;
+              }
+
               await submitMission({
                 mission,
-                agentId: targetAgentId,
+                agentId: effectiveTargetAgentId,
                 workspaceId: activeWorkspaceId ?? undefined,
                 thinking
               });
             }}
           >
-            <span className="flex items-center gap-1 text-[9px] uppercase tracking-[0.2em] text-white/75">
-              {isSubmitting ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-              Dispatch
-            </span>
-            <span className="flex items-center gap-1.5 font-display text-[0.88rem] lg:text-[0.83rem]">
-              <SendHorizontal className="h-3 w-3" />
-              Launch mission
-            </span>
+            {isSubmitting ? (
+              <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Send
           </Button>
         </div>
-
-        <AnimatePresence initial={false}>
-          {isSubmitting ? (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="rounded-[12px] border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[9px] text-cyan-100"
-            >
-              OpenClaw is processing the mission against the live gateway.
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-
-        <div className="flex flex-wrap items-center gap-1">
-            <ActionChip
-              icon={Plus}
-              label="Add Task"
-              onClick={() => setMission((current) => current || snapshot.missionPresets[0] || "Create a new task for the selected workspace.")}
-            />
-            <ActionChip
-              icon={Link2}
-              label="Link Agent"
-              onClick={() =>
-                setMission(
-                  (current) =>
-                    current ||
-                    `Link ${selectedAgent?.name || "the selected agent"} into the mission plan and define its first handoff.`
-                )
-              }
-            />
-            <ActionChip
-              icon={SlidersHorizontal}
-              label="Set Priority"
-              onClick={() => {
-                setThinking("high");
-                setMission((current) => current || "Prioritize the mission and define the critical path.");
-              }}
-            />
-        </div>
       </div>
+
+      <AnimatePresence initial={false}>
+        {isAdvancedOpen ? (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="mt-2 flex justify-end"
+          >
+            <div className="w-full max-w-[232px] rounded-[20px] border border-white/[0.08] bg-[rgba(12,17,27,0.9)] p-3 shadow-[0_16px_32px_rgba(0,0,0,0.22)]">
+              <p className="text-[11px] text-slate-300">Thinking</p>
+              <div className="mt-2">
+                <InlineSelectChip
+                  ariaLabel="Select thinking level"
+                  value={thinking}
+                  options={[
+                    { label: "off", value: "off" },
+                    { label: "minimal", value: "minimal" },
+                    { label: "low", value: "low" },
+                    { label: "medium", value: "medium" },
+                    { label: "high", value: "high" }
+                  ]}
+                  onChange={(value) => setThinking(value as ThinkingLevel)}
+                />
+              </div>
+              <button
+                type="button"
+                className="mt-3 text-[12px] text-slate-400 transition-colors hover:text-white"
+                onClick={clearCurrentDraft}
+              >
+                Clear draft
+              </button>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
@@ -304,20 +586,13 @@ function AgentSelectorChip({
   const isInteractive = options.length > 1;
 
   return (
-    <div
-      className={cn(
-        "relative inline-flex items-center rounded-full border transition-colors",
-        isInteractive
-          ? "border-cyan-300/18 bg-cyan-400/10 text-cyan-50"
-          : "border-white/[0.08] bg-white/[0.04] text-slate-200"
-      )}
-    >
+    <div className="relative inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.04] text-slate-100">
       {isInteractive ? (
         <select
           aria-label="Select mission agent"
           value={selected?.value ?? ""}
           onChange={(event) => onChange(event.target.value)}
-          className="h-6 appearance-none bg-transparent pl-2.5 pr-7 text-[11px] text-current outline-none"
+          className="h-8 appearance-none bg-transparent pl-3 pr-8 text-[12px] outline-none"
         >
           {options.map((option) => (
             <option key={option.value} value={option.value}>
@@ -326,11 +601,11 @@ function AgentSelectorChip({
           ))}
         </select>
       ) : (
-        <span className="px-2.5 text-[11px]">{selected?.label || "No agent"}</span>
+        <span className="px-3 text-[12px]">{selected?.label || "No agent"}</span>
       )}
 
       {isInteractive ? (
-        <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-cyan-200/80" />
+        <ChevronDown className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-slate-400" />
       ) : null}
     </div>
   );
@@ -340,31 +615,22 @@ function InlineSelectChip({
   ariaLabel,
   value,
   options,
-  onChange,
-  tone
+  onChange
 }: {
   ariaLabel: string;
   value: string;
   options: AgentOption[];
   onChange: (value: string) => void;
-  tone: "accent" | "neutral";
 }) {
   const selected = options.find((option) => option.value === value) ?? options[0];
 
   return (
-    <div
-      className={cn(
-        "relative inline-flex items-center rounded-full border transition-colors",
-        tone === "accent"
-          ? "border-cyan-300/18 bg-cyan-400/10 text-cyan-50"
-          : "border-white/[0.08] bg-white/[0.04] text-slate-200"
-      )}
-    >
+    <div className="relative inline-flex w-full items-center rounded-full border border-white/[0.08] bg-white/[0.04] text-slate-100">
       <select
         aria-label={ariaLabel}
         value={selected?.value ?? ""}
         onChange={(event) => onChange(event.target.value)}
-        className="h-6 appearance-none bg-transparent pl-2.5 pr-7 text-[11px] text-current outline-none"
+        className="h-9 w-full appearance-none bg-transparent pl-3 pr-9 text-[12px] outline-none"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -372,22 +638,42 @@ function InlineSelectChip({
           </option>
         ))}
       </select>
-      <ChevronDown
-        className={cn(
-          "pointer-events-none absolute right-2 h-3 w-3",
-          tone === "accent" ? "text-cyan-200/80" : "text-slate-400"
-        )}
-      />
+      <ChevronDown className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-slate-400" />
     </div>
   );
 }
 
-function ActionChip({
-  icon: Icon,
+function IconButton({
+  label,
+  active = false,
+  onClick,
+  children
+}: {
+  label: string;
+  active?: boolean;
+  onClick?: () => void | Promise<void>;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent text-slate-400 transition-all hover:border-white/[0.08] hover:bg-white/[0.06] hover:text-white",
+        active && "border-white/[0.08] bg-white/[0.06] text-white"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SuggestionChip({
   label,
   onClick
 }: {
-  icon: typeof Plus;
   label: string;
   onClick: () => void;
 }) {
@@ -395,40 +681,18 @@ function ActionChip({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[11px] border border-white/[0.08] bg-slate-950/50 px-2.5 text-[11px] font-medium text-slate-200 transition-all hover:border-cyan-300/20 hover:bg-white/[0.06] hover:text-white"
+      className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
     >
-      <Icon className="h-3 w-3 text-cyan-300" />
       {label}
     </button>
   );
 }
 
-function ControlSelect({
-  label,
-  value,
-  options,
-  onChange
-}: {
-  label: string;
-  value: string;
-  options: Array<{ label: string; value: string }>;
-  onChange: (value: string) => void;
-}) {
+function SubtlePill({ children }: { children: ReactNode }) {
   return (
-    <label className="flex h-7 items-center gap-1.5 rounded-[11px] border border-white/[0.08] bg-slate-950/50 px-2 text-slate-300">
-      <span className="text-[8px] uppercase tracking-[0.2em] text-slate-500">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-full min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300">
+      {children}
+    </div>
   );
 }
 
@@ -452,4 +716,185 @@ function resolvePreferredAgentId(
   );
 
   return workspaceAgents.find((agent) => agent.isDefault)?.id || workspaceAgents[0]?.id || snapshot.agents[0]?.id;
+}
+
+function buildInlineSuggestions(
+  snapshot: MissionControlSnapshot,
+  selectedAgent: MissionControlSnapshot["agents"][number] | null,
+  recentPrompts: RecentPrompt[]
+) {
+  const suggestions: InlineSuggestion[] = [];
+  const preset = snapshot.missionPresets[0];
+
+  if (preset) {
+    suggestions.push({
+      id: "preset-primary",
+      label: "Plan next step",
+      mission: preset
+    });
+  }
+
+  if (selectedAgent) {
+    suggestions.push({
+      id: "link-agent",
+      label: `Link ${selectedAgent.name}`,
+      mission: `Link ${selectedAgent.name} into the mission plan and define its first handoff.`
+    });
+
+    suggestions.push({
+      id: "raise-priority",
+      label: "Raise priority",
+      mission: "Prioritize the mission and define the critical path.",
+      thinking: "high"
+    });
+  }
+
+  const recentPrompt = recentPrompts[0];
+  if (recentPrompt) {
+    suggestions.push({
+      id: `recent-${recentPrompt.id}`,
+      label: "Reuse recent",
+      mission: recentPrompt.mission
+    });
+  }
+
+  const seen = new Set<string>();
+
+  return suggestions
+    .filter((item) => {
+      const key = item.mission.trim().toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 3);
+}
+
+function buildDraftScopeKey(workspaceId: string | null, agentId: string | null) {
+  if (!workspaceId && !agentId) {
+    return null;
+  }
+
+  return `${composerDraftStoragePrefix}:${workspaceId ?? "global"}:${agentId ?? "unassigned"}`;
+}
+
+function readComposerDraft(scopeKey: string): DraftRecord | null {
+  try {
+    const rawValue = globalThis.localStorage.getItem(scopeKey);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<DraftRecord>;
+
+    if (typeof parsed.mission !== "string") {
+      return null;
+    }
+
+    return {
+      mission: parsed.mission,
+      thinking: isThinkingLevel(parsed.thinking) ? parsed.thinking : "medium"
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeComposerDraft(scopeKey: string, draft: DraftRecord) {
+  try {
+    if (!draft.mission.trim() && draft.thinking === "medium") {
+      globalThis.localStorage.removeItem(scopeKey);
+      return;
+    }
+
+    globalThis.localStorage.setItem(scopeKey, JSON.stringify(draft));
+  } catch {
+    // Ignore storage failures so the composer still works without persistence.
+  }
+}
+
+function readRecentPrompts(): RecentPrompt[] {
+  try {
+    const rawValue = globalThis.localStorage.getItem(recentPromptsStorageKey);
+
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((entry): entry is RecentPrompt => {
+        return (
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof entry.id === "string" &&
+          typeof entry.mission === "string" &&
+          typeof entry.agentId === "string" &&
+          typeof entry.agentName === "string" &&
+          typeof entry.submittedAt === "number"
+        );
+      })
+      .slice(0, maxRecentPrompts);
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentPrompt(entry: RecentPrompt) {
+  const nextEntries = [
+    entry,
+    ...readRecentPrompts().filter(
+      (existing) =>
+        !(
+          existing.mission.trim() === entry.mission.trim() &&
+          existing.agentId === entry.agentId &&
+          existing.workspaceId === entry.workspaceId
+        )
+    )
+  ].slice(0, maxRecentPrompts);
+
+  try {
+    globalThis.localStorage.setItem(recentPromptsStorageKey, JSON.stringify(nextEntries));
+  } catch {
+    return nextEntries;
+  }
+
+  return nextEntries;
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) {
+    return;
+  }
+
+  textarea.style.height = "0px";
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 170)}px`;
+}
+
+function mergeMissionText(current: string, next: string) {
+  const trimmedCurrent = current.trim();
+  const trimmedNext = next.trim();
+
+  if (!trimmedCurrent) {
+    return trimmedNext;
+  }
+
+  if (!trimmedNext) {
+    return trimmedCurrent;
+  }
+
+  return `${trimmedCurrent}\n\n${trimmedNext}`;
+}
+
+function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high";
 }
