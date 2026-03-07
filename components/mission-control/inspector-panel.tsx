@@ -352,6 +352,9 @@ function GatewayOverview({
         <InfoCard icon={Cpu} title="Last mission" value={lastMission.status}>
           <p className="text-sm text-white">{lastMission.summary}</p>
           <p className="font-mono text-xs text-slate-500">Run {lastMission.runId}</p>
+          {typeof lastMission.meta?.outputDirRelative === "string" ? (
+            <p className="font-mono text-xs text-slate-400">{lastMission.meta.outputDirRelative}</p>
+          ) : null}
           {lastMission.payloads[0]?.text ? (
             <div className="rounded-[14px] border border-cyan-400/15 bg-cyan-400/8 px-3 py-2 text-[13px] text-cyan-50">
               {lastMission.payloads[0].text}

@@ -527,12 +527,26 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
     throw new Error("No OpenClaw agent is available for mission dispatch.");
   }
 
+  const missionAgent = snapshot.agents.find((entry) => entry.id === agentId);
+  const missionWorkspace =
+    snapshot.workspaces.find((entry) => entry.id === (input.workspaceId || missionAgent?.workspaceId)) ??
+    (missionAgent
+      ? {
+          id: missionAgent.workspaceId,
+          path: missionAgent.workspacePath
+        }
+      : null);
+  const outputPlan = missionWorkspace
+    ? await prepareMissionOutputPlan(missionWorkspace.path, mission)
+    : null;
+  const routedMission = outputPlan ? composeMissionWithOutputRouting(mission, outputPlan) : mission;
+
   const payload = await runOpenClawJson<MissionCommandPayload>([
     "agent",
     "--agent",
     agentId,
     "--message",
-    mission,
+    routedMission,
     "--thinking",
     input.thinking ?? "medium",
     "--timeout",
@@ -548,7 +562,12 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
     status: payload.status,
     summary: payload.summary,
     payloads: payload.result?.payloads ?? [],
-    meta: payload.result?.meta
+    meta: {
+      ...(payload.result?.meta ?? {}),
+      outputDir: outputPlan?.absoluteOutputDir,
+      outputDirRelative: outputPlan?.relativeOutputDir,
+      notesDirRelative: outputPlan?.notesDirRelative
+    }
   };
 }
 
@@ -1487,6 +1506,42 @@ async function detectPythonExamples(workspacePath: string) {
   return examples;
 }
 
+async function prepareMissionOutputPlan(workspacePath: string, mission: string) {
+  const runFolder = buildMissionOutputFolderName(mission);
+  const absoluteOutputDir = path.join(workspacePath, "deliverables", runFolder);
+  const relativeOutputDir = normalizeWorkspaceRelativePath(path.join("deliverables", runFolder));
+  const notesDirRelative = normalizeWorkspaceRelativePath("memory");
+
+  await mkdir(absoluteOutputDir, { recursive: true });
+  await mkdir(path.join(workspacePath, "memory"), { recursive: true });
+
+  return {
+    runFolder,
+    absoluteOutputDir,
+    relativeOutputDir,
+    notesDirRelative
+  };
+}
+
+function composeMissionWithOutputRouting(
+  mission: string,
+  outputPlan: {
+    relativeOutputDir: string;
+    notesDirRelative: string;
+  }
+) {
+  return [
+    mission,
+    "",
+    "Task output routing:",
+    `- Put substantial outputs, drafts, reports, docs, and file deliverables under \`${outputPlan.relativeOutputDir}/\`.`,
+    `- If a file is requested, default to \`${outputPlan.relativeOutputDir}/<descriptive-file-name>\` unless the user explicitly asks for another path.`,
+    `- Use \`${outputPlan.notesDirRelative}/\` only for temporary notes or durable workspace memory, not final deliverables.`,
+    "- Avoid writing final artifacts to the workspace root.",
+    "- Only update shared workspace docs when the change is durable and workspace-wide; task-specific docs should stay inside this run folder."
+  ].join("\n");
+}
+
 async function detectPackageManager(workspacePath: string, declaredPackageManager?: string) {
   const normalizedDeclared = normalizeOptionalValue(declaredPackageManager);
 
@@ -1516,6 +1571,22 @@ async function pathExists(targetPath: string) {
 
 function formatPackageScript(packageManager: string, scriptName: string) {
   return packageManager === "yarn" ? `yarn ${scriptName}` : `${packageManager} run ${scriptName}`;
+}
+
+function buildMissionOutputFolderName(mission: string) {
+  const now = new Date();
+  const timestamp = [
+    now.getFullYear(),
+    padNumber(now.getMonth() + 1),
+    padNumber(now.getDate()),
+    padNumber(now.getHours()),
+    padNumber(now.getMinutes()),
+    padNumber(now.getSeconds())
+  ].join("-");
+  const normalizedMission = mission.replace(/^\[[^\]]+\]\s*/i, "").trim();
+  const missionSlug = slugify(normalizedMission).slice(0, 48).replace(/^-+|-+$/g, "") || "task";
+
+  return `${timestamp}-${missionSlug}`;
 }
 
 function createWorkspaceAgentId(workspaceSlug: string, agentKey: string) {
@@ -1563,10 +1634,12 @@ ${params.brief || "Clarify the project goal, definition of done, constraints, an
 ## Daily memory
 - Capture durable facts in MEMORY.md and memory/*.md.
 - Record stable decisions in memory/decisions.md.
-- Keep temporary chatter out of durable memory and deliverables.
+- Keep temporary chatter and scratch notes in memory/.
 
 ## Output
 - Be concise in chat and write longer output to files when the artifact matters.
+- Put task-specific deliverables, drafts, reports, and docs inside per-run folders under deliverables/.
+- Avoid writing final artifacts to the workspace root unless explicitly requested.
 `;
 }
 
@@ -1719,7 +1792,8 @@ function renderDeliverablesMarkdown() {
 
 Use this folder for substantial output artifacts that should be easy to hand off or review.
 
-- Prefer one file per meaningful artifact.
+- Create one subfolder per task or run, for example \`deliverables/2026-03-07-15-30-00-launch-brief/\`.
+- Put drafts, reports, docs, and publishable assets for that task inside its run folder.
 - Keep filenames descriptive and tied to the task or audience.
 `;
 }
@@ -1761,6 +1835,7 @@ Use this skill when implementing changes in the current project.
 
 - Prefer direct code or artifact changes over speculative planning.
 - Respect AGENTS.md, TOOLS.md, MEMORY.md, and memory/*.md before large edits.
+- Put task-specific artifacts under the current deliverables run folder instead of the workspace root.
 - Verify impact before finishing and leave the workspace in a clearer state.
 `;
     case "project-reviewer":
@@ -1815,6 +1890,7 @@ Use this skill when shaping positioning, campaign direction, or editorial priori
 
 - Tie recommendations to audience, channel, and measurable goals.
 - Prefer explicit tradeoffs over vague guidance.
+- Save task-specific briefs, plans, and campaign artifacts inside the current deliverables run folder.
 - Leave a clear next-step plan other agents can execute.
 `;
     case "project-writer":
@@ -1824,6 +1900,7 @@ Use this skill when drafting messaging, copy, or narrative assets.
 
 - Write for the target audience and channel rather than internal shorthand.
 - Keep tone and structure consistent with the workspace brief.
+- Save publishable drafts and task-specific docs inside the current deliverables run folder.
 - Flag assumptions that need strategic review before publication.
 `;
     case "project-analyst":
@@ -1833,6 +1910,7 @@ Use this skill when evaluating results, experiments, or performance signals.
 
 - Prefer measurable baselines and explicit comparisons.
 - Separate observed performance from speculation about causality.
+- Keep task-specific reports and analysis artifacts inside the current deliverables run folder.
 - Write down recommendations that can be actioned by the team.
 `;
     default:
@@ -1842,6 +1920,7 @@ Use this skill when operating in the current workspace.
 
 - Stay grounded in the shared workspace context.
 - Produce durable artifacts when the work needs to be handed off.
+- Put task-specific artifacts in the current deliverables run folder and keep notes in memory/.
 - Keep outputs specific, reviewable, and easy for other agents to extend.
 `;
   }
@@ -3163,6 +3242,14 @@ function prettifyAgentName(agentId: string | undefined) {
 
 function unique(values: string[]) {
   return Array.from(new Set(values));
+}
+
+function padNumber(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function normalizeWorkspaceRelativePath(targetPath: string) {
+  return targetPath.split(path.sep).join("/");
 }
 
 function normalizeOptionalValue(value: string | undefined) {

@@ -140,7 +140,10 @@ export function CommandBar({
       onMissionDispatchComplete("success");
       setMission("");
       toast.success("Mission dispatched to OpenClaw.", {
-        description: `Run ${result.runId.slice(0, 8)} via ${result.agentId}`
+        description:
+          typeof result.meta?.outputDirRelative === "string"
+            ? `Run ${result.runId.slice(0, 8)} via ${result.agentId} · ${result.meta.outputDirRelative}`
+            : `Run ${result.runId.slice(0, 8)} via ${result.agentId}`
       });
       await onRefresh();
     } catch (error) {
