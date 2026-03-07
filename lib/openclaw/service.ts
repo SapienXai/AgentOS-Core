@@ -28,6 +28,7 @@ import type {
   RuntimeRecord,
   RuntimeOutputItem,
   RuntimeOutputRecord,
+  RuntimeCreatedFile,
   WorkspaceAgentBlueprintInput,
   WorkspaceCreateResult,
   WorkspaceCreateRules,
@@ -187,6 +188,7 @@ type SessionTranscriptEntry = {
   id?: string;
   parentId?: string | null;
   timestamp?: string;
+  cwd?: string;
   customType?: string;
   data?: {
     timestamp?: number;
@@ -200,9 +202,15 @@ type SessionTranscriptEntry = {
       type?: string;
       text?: string;
       thinking?: string;
+      id?: string;
+      name?: string;
+      arguments?: Record<string, unknown>;
     }>;
     stopReason?: string;
     errorMessage?: string;
+    toolCallId?: string;
+    toolName?: string;
+    isError?: boolean;
     usage?: {
       input?: number;
       output?: number;
@@ -226,6 +234,7 @@ type TranscriptTurn = {
   stopReason: string | null;
   errorMessage: string | null;
   tokenUsage?: RuntimeRecord["tokenUsage"];
+  createdFiles: RuntimeCreatedFile[];
 };
 
 let snapshotCache: { snapshot: MissionControlSnapshot; expiresAt: number } | null = null;
@@ -397,12 +406,28 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
       }
     }
 
-    const workspaces = Array.from(workspaceByPath.values()).map((workspace) => ({
-      ...workspace,
-      modelIds: unique(workspace.modelIds),
-      activeRuntimeIds: unique(workspace.activeRuntimeIds),
-      health: resolveWorkspaceHealth(workspace.agentIds, agents)
-    }));
+    const agentsByWorkspace = new Map<string, OpenClawAgent[]>();
+    for (const agent of agents) {
+      const list = agentsByWorkspace.get(agent.workspaceId) ?? [];
+      list.push(agent);
+      agentsByWorkspace.set(agent.workspaceId, list);
+    }
+
+    const workspaces = await Promise.all(
+      Array.from(workspaceByPath.values()).map(async (workspace) => {
+        const workspaceAgents = agentsByWorkspace.get(workspace.id) ?? [];
+        const metadata = await readWorkspaceInspectorMetadata(workspace.path, workspaceAgents);
+
+        return {
+          ...workspace,
+          modelIds: unique(workspace.modelIds),
+          activeRuntimeIds: unique(workspace.activeRuntimeIds),
+          health: resolveWorkspaceHealth(workspace.agentIds, agents),
+          bootstrap: metadata.bootstrap,
+          capabilities: metadata.capabilities
+        };
+      })
+    );
 
     const modelUsage = new Map<string, number>();
     for (const agent of agents) {
@@ -552,7 +577,9 @@ async function mapSessionToRuntimes(
 
   try {
     const raw = await readFile(transcriptPath, "utf8");
-    const turns = extractTranscriptTurns(raw, runtime).filter((turn) => !isHeartbeatTurn(turn.prompt));
+    const turns = extractTranscriptTurns(raw, runtime, agent?.workspace || config?.workspace).filter(
+      (turn) => !isHeartbeatTurn(turn.prompt)
+    );
 
     if (turns.length === 0) {
       return [runtime];
@@ -576,7 +603,8 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       finalTimestamp: null,
       stopReason: null,
       errorMessage: "Runtime was not found in the current OpenClaw snapshot.",
-      items: []
+      items: [],
+      createdFiles: []
     };
   }
 
@@ -599,7 +627,8 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
           stopReason: "fallback",
           isError: false
         }
-      ]
+      ],
+      createdFiles: []
     };
   }
 
@@ -613,7 +642,8 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       finalTimestamp: null,
       stopReason: null,
       errorMessage: "This runtime does not expose a session transcript yet.",
-      items: []
+      items: [],
+      createdFiles: []
     };
   }
 
@@ -630,13 +660,14 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       finalTimestamp: null,
       stopReason: null,
       errorMessage: "No transcript file was found for this runtime session.",
-      items: []
+      items: [],
+      createdFiles: []
     };
   }
 
   try {
     const raw = await readFile(transcriptPath, "utf8");
-    return parseRuntimeOutput(runtime, raw);
+    return parseRuntimeOutput(runtime, raw, agent?.workspacePath);
   } catch (error) {
     return {
       runtimeId,
@@ -647,7 +678,8 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       finalTimestamp: null,
       stopReason: null,
       errorMessage: error instanceof Error ? error.message : "Unable to read runtime transcript.",
-      items: []
+      items: [],
+      createdFiles: []
     };
   }
 }
@@ -1004,7 +1036,25 @@ async function scaffoldWorkspaceContents(
         icon: templateMeta.icon,
         createdAt,
         updatedAt: createdAt,
-        agentTemplate: options.teamPreset === "solo" ? "solo" : "core-team"
+        template: options.template,
+        sourceMode: options.sourceMode,
+        teamPreset: options.teamPreset,
+        modelProfile: options.modelProfile,
+        agentTemplate: options.teamPreset === "solo" ? "solo" : "core-team",
+        rules: {
+          workspaceOnly: options.rules.workspaceOnly,
+          generateStarterDocs: options.rules.generateStarterDocs,
+          generateMemory: options.rules.generateMemory,
+          kickoffMission: options.rules.kickoffMission
+        },
+        agents: options.agents.map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          role: agent.role,
+          isPrimary: Boolean(agent.isPrimary),
+          skillId: normalizeOptionalValue(agent.skillId) ?? null,
+          modelId: normalizeOptionalValue(agent.modelId) ?? null
+        }))
       },
       null,
       2
@@ -1944,8 +1994,8 @@ async function resolveRuntimeTranscriptPath(
   return null;
 }
 
-function parseRuntimeOutput(runtime: RuntimeRecord, raw: string): RuntimeOutputRecord {
-  const turns = extractTranscriptTurns(raw, runtime);
+function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?: string): RuntimeOutputRecord {
+  const turns = extractTranscriptTurns(raw, runtime, workspacePath);
 
   if (runtime.source === "turn") {
     const turnId = typeof runtime.metadata.turnId === "string" ? runtime.metadata.turnId : null;
@@ -1971,7 +2021,8 @@ function parseRuntimeOutput(runtime: RuntimeRecord, raw: string): RuntimeOutputR
     finalTimestamp: null,
     stopReason: null,
     errorMessage: "No transcript entries were found for this runtime.",
-    items: []
+    items: [],
+    createdFiles: []
   };
 }
 
@@ -1985,22 +2036,30 @@ function runtimeOutputFromTurn(runtime: RuntimeRecord, turn: TranscriptTurn): Ru
     finalTimestamp: turn.finalTimestamp,
     stopReason: turn.stopReason,
     errorMessage: turn.errorMessage,
-    items: turn.items.slice(-12)
+    items: turn.items.slice(-12),
+    createdFiles: turn.createdFiles
   };
 }
 
-function extractTranscriptTurns(raw: string, runtime: RuntimeRecord) {
+function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePath?: string) {
   const lines = raw.split(/\r?\n/).filter(Boolean);
   const turns: TranscriptTurn[] = [];
+  let sessionCwd = workspacePath;
   let currentTurn:
     | (Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "errorMessage"> & {
         errorMessage: string | null;
+        pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
       })
     | null = null;
 
   for (const line of lines) {
     try {
       const entry = JSON.parse(line) as SessionTranscriptEntry;
+
+      if (entry.type === "session" && typeof entry.cwd === "string" && entry.cwd.trim()) {
+        sessionCwd = entry.cwd.trim();
+        continue;
+      }
 
       if (entry.type === "custom" && entry.customType === "openclaw:prompt-error" && currentTurn) {
         currentTurn.runId ||= entry.data?.runId;
@@ -2023,7 +2082,9 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord) {
       const errorMessage = entry.message.errorMessage ?? null;
 
       if (!text && !errorMessage) {
-        continue;
+        if (role !== "assistant" || !entry.message.content?.some((item) => item.type === "toolCall")) {
+          continue;
+        }
       }
 
       const item: RuntimeOutputItem = {
@@ -2031,11 +2092,15 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord) {
         role,
         timestamp: entry.timestamp || new Date().toISOString(),
         text: text || errorMessage || "",
-        toolName: role === "toolResult" ? extractToolNameFromTranscriptText(text) : undefined,
+        toolName:
+          role === "toolResult"
+            ? entry.message.toolName || extractToolNameFromTranscriptText(text)
+            : undefined,
         stopReason: role === "assistant" ? entry.message.stopReason ?? null : null,
         errorMessage,
         isError:
           Boolean(errorMessage) ||
+          entry.message.isError === true ||
           entry.message.stopReason === "error" ||
           entry.message.stopReason === "aborted"
       };
@@ -2054,7 +2119,9 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord) {
           updatedAt: item.timestamp,
           items: [item],
           tokenUsage: undefined,
-          errorMessage: null
+          errorMessage: null,
+          createdFiles: [],
+          pendingCreatedFiles: new Map()
         };
         continue;
       }
@@ -2063,9 +2130,49 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord) {
         continue;
       }
 
+      if (role === "assistant" && Array.isArray(entry.message.content)) {
+        for (const contentItem of entry.message.content) {
+          if (contentItem.type !== "toolCall" || contentItem.name !== "write") {
+            continue;
+          }
+
+          const candidatePath =
+            typeof contentItem.arguments?.path === "string" ? contentItem.arguments.path.trim() : "";
+
+          if (!candidatePath) {
+            continue;
+          }
+
+          const resolved = resolveTranscriptArtifactPath(candidatePath, sessionCwd);
+
+          if (!resolved) {
+            continue;
+          }
+
+          currentTurn.pendingCreatedFiles.set(contentItem.id || `${entry.id || "toolCall"}:${candidatePath}`, {
+            path: resolved.path,
+            displayPath: resolved.displayPath
+          });
+        }
+      }
+
       currentTurn.items.push(item);
       currentTurn.updatedAt = item.timestamp;
       currentTurn.errorMessage ||= errorMessage;
+
+      if (
+        role === "toolResult" &&
+        entry.message.isError !== true &&
+        entry.message.toolName === "write" &&
+        typeof entry.message.toolCallId === "string"
+      ) {
+        const createdFile = currentTurn.pendingCreatedFiles.get(entry.message.toolCallId);
+
+        if (createdFile) {
+          currentTurn.createdFiles.push(createdFile);
+          currentTurn.pendingCreatedFiles.delete(entry.message.toolCallId);
+        }
+      }
 
       if (role === "assistant" && entry.message.usage) {
         currentTurn.tokenUsage = {
@@ -2090,8 +2197,10 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord) {
 function finalizeTranscriptTurn(
   turn: Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason"> & {
     errorMessage: string | null;
+    pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
   }
 ): TranscriptTurn {
+  const { pendingCreatedFiles: _pendingCreatedFiles, ...rest } = turn;
   const finalAssistant = [...turn.items]
     .reverse()
     .find((item) => item.role === "assistant" && (item.text.trim().length > 0 || item.errorMessage));
@@ -2110,12 +2219,13 @@ function finalizeTranscriptTurn(
         : "active";
 
   return {
-    ...turn,
+    ...rest,
     status,
     finalText: finalAssistant?.text ?? null,
     finalTimestamp: finalAssistant?.timestamp ?? null,
     stopReason,
-    errorMessage: turn.errorMessage || finalAssistant?.errorMessage || null
+    errorMessage: turn.errorMessage || finalAssistant?.errorMessage || null,
+    createdFiles: dedupeCreatedFiles(turn.createdFiles)
   };
 }
 
@@ -2148,9 +2258,54 @@ function createTurnRuntime(runtime: RuntimeRecord, turn: TranscriptTurn): Runtim
       turnId: turn.id,
       turnPrompt: turn.prompt,
       stage: "main.turn",
-      historical: turn.status !== "active"
+      historical: turn.status !== "active",
+      createdFiles: turn.createdFiles
     }
   };
+}
+
+function resolveTranscriptArtifactPath(targetPath: string, basePath?: string) {
+  const normalizedTarget = targetPath.trim();
+
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const absolutePath = path.isAbsolute(normalizedTarget)
+    ? path.normalize(normalizedTarget)
+    : basePath
+      ? path.resolve(basePath, normalizedTarget)
+      : null;
+
+  if (!absolutePath) {
+    return null;
+  }
+
+  const displayPath =
+    basePath && absolutePath.startsWith(`${path.resolve(basePath)}${path.sep}`)
+      ? path.relative(path.resolve(basePath), absolutePath) || path.basename(absolutePath)
+      : absolutePath;
+
+  return {
+    path: absolutePath,
+    displayPath
+  } satisfies RuntimeCreatedFile;
+}
+
+function dedupeCreatedFiles(files: RuntimeCreatedFile[]) {
+  const seen = new Set<string>();
+  const deduped: RuntimeCreatedFile[] = [];
+
+  for (const file of files) {
+    if (!file.path || seen.has(file.path)) {
+      continue;
+    }
+
+    seen.add(file.path);
+    deduped.push(file);
+  }
+
+  return deduped;
 }
 
 function normalizeTranscriptPrompt(text: string) {
@@ -2281,6 +2436,163 @@ async function readAgentBootstrapProfile(
     outputPreference,
     sourceFiles: sources
   };
+}
+
+async function readWorkspaceInspectorMetadata(
+  workspacePath: string,
+  agents: OpenClawAgent[]
+): Promise<Pick<WorkspaceProject, "bootstrap" | "capabilities">> {
+  const [projectMeta, coreFiles, optionalFiles, folders, projectShell, localSkillIds] =
+    await Promise.all([
+      readWorkspaceProjectManifest(workspacePath),
+      collectWorkspaceResourceState(workspacePath, [
+        { id: "agents", label: "AGENTS.md", relativePath: "AGENTS.md", kind: "file" },
+        { id: "soul", label: "SOUL.md", relativePath: "SOUL.md", kind: "file" },
+        { id: "identity", label: "IDENTITY.md", relativePath: "IDENTITY.md", kind: "file" },
+        { id: "tools", label: "TOOLS.md", relativePath: "TOOLS.md", kind: "file" },
+        { id: "heartbeat", label: "HEARTBEAT.md", relativePath: "HEARTBEAT.md", kind: "file" }
+      ]),
+      collectWorkspaceResourceState(workspacePath, [
+        { id: "memory-md", label: "MEMORY.md", relativePath: "MEMORY.md", kind: "file" }
+      ]),
+      collectWorkspaceResourceState(workspacePath, [
+        { id: "docs", label: "docs/", relativePath: "docs", kind: "directory" },
+        { id: "memory", label: "memory/", relativePath: "memory", kind: "directory" },
+        { id: "deliverables", label: "deliverables/", relativePath: "deliverables", kind: "directory" },
+        { id: "skills", label: "skills/", relativePath: "skills", kind: "directory" },
+        { id: "openclaw", label: ".openclaw/", relativePath: ".openclaw", kind: "directory" }
+      ]),
+      collectWorkspaceResourceState(workspacePath, [
+        {
+          id: "project-json",
+          label: ".openclaw/project.json",
+          relativePath: ".openclaw/project.json",
+          kind: "file"
+        },
+        {
+          id: "events",
+          label: ".openclaw/project-shell/events.jsonl",
+          relativePath: ".openclaw/project-shell/events.jsonl",
+          kind: "file"
+        },
+        {
+          id: "runs",
+          label: ".openclaw/project-shell/runs",
+          relativePath: ".openclaw/project-shell/runs",
+          kind: "directory"
+        },
+        {
+          id: "tasks",
+          label: ".openclaw/project-shell/tasks",
+          relativePath: ".openclaw/project-shell/tasks",
+          kind: "directory"
+        }
+      ]),
+      listLocalWorkspaceSkills(workspacePath)
+    ]);
+  const tools = uniqueStrings(agents.flatMap((agent) => agent.tools));
+  const skills = uniqueStrings([...localSkillIds, ...agents.flatMap((agent) => agent.skills)]);
+  const workspaceOnlyAgentCount = agents.filter((agent) => agent.tools.includes("fs.workspaceOnly")).length;
+
+  return {
+    bootstrap: {
+      template: projectMeta.template,
+      sourceMode: projectMeta.sourceMode,
+      agentTemplate: projectMeta.agentTemplate,
+      coreFiles,
+      optionalFiles,
+      folders,
+      projectShell,
+      localSkillIds
+    },
+    capabilities: {
+      skills,
+      tools,
+      workspaceOnlyAgentCount
+    }
+  };
+}
+
+async function collectWorkspaceResourceState(
+  workspacePath: string,
+  entries: Array<{
+    id: string;
+    label: string;
+    relativePath: string;
+    kind: "file" | "directory";
+  }>
+) {
+  return Promise.all(
+    entries.map(async (entry) => ({
+      id: entry.id,
+      label: entry.label,
+      present: await pathMatchesKind(path.join(workspacePath, entry.relativePath), entry.kind)
+    }))
+  );
+}
+
+async function listLocalWorkspaceSkills(workspacePath: string) {
+  const skillsPath = path.join(workspacePath, "skills");
+
+  try {
+    const entries = await readdir(skillsPath, { withFileTypes: true });
+    const localSkills = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const skillFile = path.join(skillsPath, entry.name, "SKILL.md");
+          return (await pathMatchesKind(skillFile, "file")) ? entry.name : null;
+        })
+    );
+
+    return localSkills.filter((entry): entry is string => Boolean(entry)).sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+async function readWorkspaceProjectManifest(workspacePath: string) {
+  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
+
+  try {
+    const raw = await readFile(projectFilePath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    return {
+      template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
+      sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null,
+      agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null
+    };
+  } catch {
+    return {
+      template: null,
+      sourceMode: null,
+      agentTemplate: null
+    };
+  }
+}
+
+async function pathMatchesKind(targetPath: string, kind: "file" | "directory") {
+  try {
+    const targetStat = await stat(targetPath);
+    return kind === "directory" ? targetStat.isDirectory() : targetStat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isWorkspaceTemplate(value: unknown): value is WorkspaceTemplate {
+  return (
+    value === "software" ||
+    value === "frontend" ||
+    value === "backend" ||
+    value === "research" ||
+    value === "content"
+  );
+}
+
+function isWorkspaceSourceMode(value: unknown): value is WorkspaceSourceMode {
+  return value === "empty" || value === "clone" || value === "existing";
 }
 
 function extractPurpose(sections: Map<string, string[]>) {
@@ -2481,7 +2793,22 @@ function ensureWorkspace(store: Map<string, WorkspaceProject>, workspacePath: st
     modelIds: [],
     activeRuntimeIds: [],
     totalSessions: 0,
-    health: "standby"
+    health: "standby",
+    bootstrap: {
+      template: null,
+      sourceMode: null,
+      agentTemplate: null,
+      coreFiles: [],
+      optionalFiles: [],
+      folders: [],
+      projectShell: [],
+      localSkillIds: []
+    },
+    capabilities: {
+      skills: [],
+      tools: [],
+      workspaceOnlyAgentCount: 0
+    }
   };
 
   store.set(workspaceId, workspace);

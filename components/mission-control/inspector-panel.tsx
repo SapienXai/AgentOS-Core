@@ -15,6 +15,7 @@ import {
   TerminalSquare
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +28,7 @@ import {
 import type {
   MissionControlSnapshot,
   MissionResponse,
+  RuntimeCreatedFile,
   RuntimeOutputRecord
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
@@ -370,26 +372,193 @@ function WorkspaceContent({
 }) {
   const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
   const agents = snapshot.agents.filter((agent) => agent.workspaceId === workspaceId);
+  const models = workspace
+    ? workspace.modelIds.map((modelId) => snapshot.models.find((model) => model.id === modelId)?.name || modelId)
+    : [];
+  const workspaceRuntimes = snapshot.runtimes
+    .filter((runtime) => runtime.workspaceId === workspaceId || workspace?.activeRuntimeIds.includes(runtime.id))
+    .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
 
   if (!workspace) {
     return null;
   }
 
+  const liveRuntimes = workspaceRuntimes.filter((runtime) =>
+    runtime.status === "active" || runtime.status === "queued" || runtime.status === "idle"
+  );
+  const latestRuntime = workspaceRuntimes[0] ?? null;
+  const createdFiles = dedupeCreatedFiles(workspaceRuntimes.flatMap(extractCreatedFilesFromRuntime)).slice(0, 8);
+  const bootstrapState =
+    workspace.bootstrap.coreFiles.every((item) => item.present) &&
+    workspace.bootstrap.projectShell.every((item) => item.present)
+      ? "ready"
+      : workspace.bootstrap.coreFiles.some((item) => item.present) ||
+          workspace.bootstrap.projectShell.some((item) => item.present)
+        ? "partial"
+        : "thin";
+  const workspaceOnlyMode =
+    agents.length === 0
+      ? "no agents"
+      : workspace.capabilities.workspaceOnlyAgentCount === agents.length
+        ? "workspace-only"
+        : workspace.capabilities.workspaceOnlyAgentCount === 0
+          ? "open"
+          : "mixed";
+
   return (
     <>
-      <InfoCard icon={FolderGit2} title="Workspace path" value={workspace.slug}>
+      <InfoCard icon={FolderGit2} title="Overview" value={workspace.health}>
         <p className="font-mono text-xs text-slate-400">{compactPath(workspace.path)}</p>
-      </InfoCard>
-      <InfoCard icon={Cpu} title="Attached agents" value={String(agents.length)}>
-        {agents.map((agent) => (
-          <div
-            key={agent.id}
-            className="flex items-center justify-between rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
-          >
-            <span className="text-[13px] text-white">{agent.name}</span>
-            <Badge variant="muted">{agent.status}</Badge>
+        <InspectorMetricGrid
+          items={[
+            { label: "Agents", value: String(agents.length) },
+            { label: "Models", value: String(workspace.modelIds.length) },
+            { label: "Runs", value: String(workspaceRuntimes.length) },
+            { label: "Sessions", value: String(workspace.totalSessions) }
+          ]}
+        />
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Models</p>
+          <InspectorTagGroup
+            emptyLabel="No models attached"
+            items={models}
+            emptyVariant="muted"
+            itemVariant="muted"
+          />
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Team</p>
+          <div className="flex flex-wrap gap-2">
+            {agents.map((agent) => (
+              <Badge key={agent.id} variant={agent.isDefault ? "default" : "muted"}>
+                {agent.name}
+              </Badge>
+            ))}
           </div>
-        ))}
+        </div>
+      </InfoCard>
+
+      <InfoCard icon={Cpu} title="Bootstrap" value={bootstrapState}>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={workspace.bootstrap.template ? "default" : "muted"}>
+            {workspace.bootstrap.template || "template unknown"}
+          </Badge>
+          <Badge variant={workspace.bootstrap.sourceMode ? "muted" : "warning"}>
+            {workspace.bootstrap.sourceMode || "source unknown"}
+          </Badge>
+          {workspace.bootstrap.agentTemplate ? <Badge variant="muted">{workspace.bootstrap.agentTemplate}</Badge> : null}
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Core files</p>
+          <InspectorPresenceGroup items={workspace.bootstrap.coreFiles} missingVariant="warning" />
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Optional scaffold</p>
+          <InspectorPresenceGroup items={[...workspace.bootstrap.optionalFiles, ...workspace.bootstrap.folders]} />
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Project shell</p>
+          <InspectorPresenceGroup items={workspace.bootstrap.projectShell} />
+        </div>
+      </InfoCard>
+
+      <InfoCard icon={Cpu} title="Capabilities" value={workspaceOnlyMode}>
+        <p>
+          {workspace.capabilities.workspaceOnlyAgentCount}/{agents.length} agents are configured with
+          {" "}
+          <span className="font-mono text-xs text-slate-300">fs.workspaceOnly</span>
+          .
+        </p>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
+          <InspectorTagGroup
+            emptyLabel="No explicit skills"
+            items={workspace.capabilities.skills}
+            emptyVariant="muted"
+            itemVariant="muted"
+          />
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Local workspace skills</p>
+          <InspectorTagGroup
+            emptyLabel="No local SKILL.md scaffolds"
+            items={workspace.bootstrap.localSkillIds}
+            emptyVariant="muted"
+            itemVariant="success"
+          />
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+          <InspectorTagGroup
+            emptyLabel="No explicit tools"
+            items={workspace.capabilities.tools}
+            emptyVariant="muted"
+            itemVariant="warning"
+          />
+        </div>
+      </InfoCard>
+
+      <InfoCard icon={TerminalSquare} title="Activity" value={`${liveRuntimes.length} live`}>
+        <p>{workspaceRuntimes.length} tracked runs across {workspace.totalSessions} recorded sessions.</p>
+        <p>{latestRuntime ? `Latest update ${formatRelativeTime(latestRuntime.updatedAt)}` : "No runtime activity has been recorded yet."}</p>
+        {workspaceRuntimes.length > 0 ? (
+          <div className="space-y-2 pt-1">
+            {workspaceRuntimes.slice(0, 3).map((runtime) => (
+              <div
+                key={runtime.id}
+                className="flex items-center justify-between rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] text-white">{runtime.title}</p>
+                  <p className="truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                    {runtime.subtitle} · {shortId(runtime.runId || runtime.id, 10)}
+                  </p>
+                </div>
+                <Badge
+                  variant={
+                    runtime.status === "active"
+                      ? "default"
+                      : runtime.status === "completed"
+                        ? "success"
+                        : runtime.status === "error"
+                          ? "danger"
+                          : "muted"
+                  }
+                >
+                  {runtime.status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Agent posture</p>
+          <div className="space-y-2">
+            {agents.map((agent) => (
+              <div
+                key={agent.id}
+                className="flex items-center justify-between rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] text-white">{agent.name}</p>
+                  <p className="truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                    {agent.currentAction}
+                  </p>
+                </div>
+                <Badge variant={agent.status === "engaged" ? "default" : agent.status === "offline" ? "danger" : "muted"}>
+                  {agent.status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      </InfoCard>
+
+      <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
+        <InspectorCreatedFileList
+          files={createdFiles}
+          emptyLabel="No file artifacts have been detected in recent workspace runs."
+        />
       </InfoCard>
     </>
   );
@@ -408,6 +577,7 @@ function AgentContent({
   const activeRuntimes = snapshot.runtimes
     .filter((runtime) => agent?.activeRuntimeIds.includes(runtime.id))
     .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const createdFiles = dedupeCreatedFiles(activeRuntimes.flatMap(extractCreatedFilesFromRuntime)).slice(0, 8);
 
   if (!agent) {
     return null;
@@ -512,6 +682,13 @@ function AgentContent({
         ))}
       </InfoCard>
 
+      <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
+        <InspectorCreatedFileList
+          files={createdFiles}
+          emptyLabel="No file artifacts have been detected for this agent yet."
+        />
+      </InfoCard>
+
       <InfoCard icon={Cpu} title="Capabilities" value={`${agent.skills.length} skills`}>
         <InspectorTagGroup
           emptyLabel="No explicit skills"
@@ -547,6 +724,7 @@ function RuntimeContent({
   runtimeOutputError: string | null;
 }) {
   const runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
+  const createdFiles = dedupeCreatedFiles(runtimeOutput?.createdFiles ?? (runtime ? extractCreatedFilesFromRuntime(runtime) : []));
 
   if (!runtime) {
     return null;
@@ -581,6 +759,12 @@ function RuntimeContent({
             Updated {formatRelativeTime(new Date(runtimeOutput.finalTimestamp).getTime())}
           </p>
         ) : null}
+      </InfoCard>
+      <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
+        <InspectorCreatedFileList
+          files={createdFiles}
+          emptyLabel="This runtime has not produced a detectable file artifact."
+        />
       </InfoCard>
     </>
   );
@@ -623,6 +807,13 @@ function RuntimeOutputContent({
 
   return (
     <div className="space-y-3.5">
+      <InfoCard icon={FileJson} title="Created files" value={String(runtimeOutput.createdFiles.length)}>
+        <InspectorCreatedFileList
+          files={runtimeOutput.createdFiles}
+          emptyLabel="This runtime transcript does not include a successful file creation."
+        />
+      </InfoCard>
+
       <InfoCard icon={TerminalSquare} title="Final response" value={runtimeOutput.stopReason || runtimeOutput.status}>
         <p className="whitespace-pre-wrap text-[13px] leading-5 text-slate-100">
           {runtimeOutput.finalText || runtimeOutput.errorMessage || "No assistant output has been recorded for this runtime yet."}
@@ -785,6 +976,77 @@ function InfoCard({
   );
 }
 
+function InspectorCreatedFileList({
+  files,
+  emptyLabel
+}: {
+  files: RuntimeCreatedFile[];
+  emptyLabel: string;
+}) {
+  if (files.length === 0) {
+    return <p className="text-[12px] text-slate-400">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {files.map((file) => (
+        <button
+          key={file.path}
+          type="button"
+          onClick={() => void revealLocalFile(file.path)}
+          className="w-full rounded-[14px] border border-cyan-300/12 bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2 text-left transition-all hover:border-cyan-300/28 hover:bg-cyan-400/[0.08]"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-mono text-[12px] text-cyan-100">{file.displayPath}</p>
+              <p className="truncate text-[11px] text-slate-400">{compactPath(file.path)}</p>
+            </div>
+            <Badge variant="muted">reveal</Badge>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function InspectorMetricGrid({
+  items
+}: {
+  items: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className="rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
+          <p className="mt-1 text-[13px] text-white">{item.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InspectorPresenceGroup({
+  items,
+  missingVariant = "muted"
+}: {
+  items: MissionControlSnapshot["workspaces"][number]["bootstrap"]["coreFiles"];
+  missingVariant?: React.ComponentProps<typeof Badge>["variant"];
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((item) => (
+        <Badge key={item.id} variant={item.present ? "success" : missingVariant}>
+          {item.label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 function InspectorTagGroup({
   items,
   emptyLabel,
@@ -834,4 +1096,74 @@ function InspectorBulletList({
       ))}
     </div>
   );
+}
+
+function extractCreatedFilesFromRuntime(runtime: MissionControlSnapshot["runtimes"][number]) {
+  const rawCreatedFiles = runtime.metadata.createdFiles;
+
+  if (!Array.isArray(rawCreatedFiles)) {
+    return [];
+  }
+
+  return rawCreatedFiles.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+
+    const pathValue = "path" in entry && typeof entry.path === "string" ? entry.path : null;
+    const displayPathValue =
+      "displayPath" in entry && typeof entry.displayPath === "string" ? entry.displayPath : pathValue;
+
+    if (!pathValue || !displayPathValue) {
+      return [];
+    }
+
+    return [
+      {
+        path: pathValue,
+        displayPath: displayPathValue
+      } satisfies RuntimeCreatedFile
+    ];
+  });
+}
+
+function dedupeCreatedFiles(files: RuntimeCreatedFile[]) {
+  const seen = new Set<string>();
+  const deduped: RuntimeCreatedFile[] = [];
+
+  for (const file of files) {
+    if (!file.path || seen.has(file.path)) {
+      continue;
+    }
+
+    seen.add(file.path);
+    deduped.push(file);
+  }
+
+  return deduped;
+}
+
+async function revealLocalFile(targetPath: string) {
+  try {
+    const response = await fetch("/api/files/reveal", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ path: targetPath })
+    });
+    const payload = (await response.json()) as { error?: string };
+
+    if (!response.ok) {
+      throw new Error(payload.error || "Unable to reveal file.");
+    }
+
+    toast.success("Revealed file.", {
+      description: compactPath(targetPath)
+    });
+  } catch (error) {
+    toast.error("Could not reveal file.", {
+      description: error instanceof Error ? error.message : "Unknown file reveal error."
+    });
+  }
 }

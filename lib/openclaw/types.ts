@@ -33,6 +33,29 @@ export interface PresenceRecord {
   ts: number;
 }
 
+export interface WorkspaceResourceState {
+  id: string;
+  label: string;
+  present: boolean;
+}
+
+export interface WorkspaceBootstrapState {
+  template: WorkspaceTemplate | null;
+  sourceMode: WorkspaceSourceMode | null;
+  agentTemplate: string | null;
+  coreFiles: WorkspaceResourceState[];
+  optionalFiles: WorkspaceResourceState[];
+  folders: WorkspaceResourceState[];
+  projectShell: WorkspaceResourceState[];
+  localSkillIds: string[];
+}
+
+export interface WorkspaceCapabilityState {
+  skills: string[];
+  tools: string[];
+  workspaceOnlyAgentCount: number;
+}
+
 export interface WorkspaceProject {
   id: string;
   name: string;
@@ -44,6 +67,8 @@ export interface WorkspaceProject {
   activeRuntimeIds: string[];
   totalSessions: number;
   health: AgentStatus;
+  bootstrap: WorkspaceBootstrapState;
+  capabilities: WorkspaceCapabilityState;
 }
 
 export interface OpenClawAgent {
@@ -128,6 +153,11 @@ export interface RuntimeOutputItem {
   isError?: boolean;
 }
 
+export interface RuntimeCreatedFile {
+  path: string;
+  displayPath: string;
+}
+
 export interface RuntimeOutputRecord {
   runtimeId: string;
   sessionId?: string;
@@ -138,6 +168,7 @@ export interface RuntimeOutputRecord {
   stopReason: string | null;
   errorMessage: string | null;
   items: RuntimeOutputItem[];
+  createdFiles: RuntimeCreatedFile[];
 }
 
 export type RelationshipKind = "contains" | "uses-model" | "active-run";

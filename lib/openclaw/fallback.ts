@@ -28,7 +28,39 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         modelIds: ["openai-codex/gpt-5.1-codex-mini", "ollama/qwen3.5:9b"],
         activeRuntimeIds: ["runtime-demo-plan"],
         totalSessions: 2,
-        health: "engaged"
+        health: "engaged",
+        bootstrap: {
+          template: "software",
+          sourceMode: "empty",
+          agentTemplate: "core-team",
+          coreFiles: [
+            { id: "agents", label: "AGENTS.md", present: true },
+            { id: "soul", label: "SOUL.md", present: true },
+            { id: "identity", label: "IDENTITY.md", present: true },
+            { id: "tools", label: "TOOLS.md", present: true },
+            { id: "heartbeat", label: "HEARTBEAT.md", present: true }
+          ],
+          optionalFiles: [{ id: "memory-md", label: "MEMORY.md", present: true }],
+          folders: [
+            { id: "docs", label: "docs/", present: true },
+            { id: "memory", label: "memory/", present: true },
+            { id: "deliverables", label: "deliverables/", present: true },
+            { id: "skills", label: "skills/", present: true },
+            { id: "openclaw", label: ".openclaw/", present: true }
+          ],
+          projectShell: [
+            { id: "project-json", label: ".openclaw/project.json", present: true },
+            { id: "events", label: ".openclaw/project-shell/events.jsonl", present: true },
+            { id: "runs", label: ".openclaw/project-shell/runs", present: true },
+            { id: "tasks", label: ".openclaw/project-shell/tasks", present: true }
+          ],
+          localSkillIds: ["planning", "execution"]
+        },
+        capabilities: {
+          skills: ["planning", "execution"],
+          tools: ["fs.workspaceOnly"],
+          workspaceOnlyAgentCount: 2
+        }
       }
     ],
     agents: [
