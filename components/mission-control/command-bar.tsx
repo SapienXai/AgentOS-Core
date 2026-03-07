@@ -12,6 +12,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
 import { WorkspaceCreateDialog } from "@/components/mission-control/workspace-create-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -96,6 +97,7 @@ export function CommandBar({
   const [composeSuggestion, setComposeSuggestion] = useState<ComposerSuggestion | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autoSelectionScopeRef = useRef<string | null>(null);
+  const preferredCreatedAgentIdRef = useRef<string | null>(null);
   const handledComposeIntentIdRef = useRef<string | null>(null);
   const skipDraftSaveRef = useRef(false);
   const suspendDraftHydrationForScopeRef = useRef<string | null>(null);
@@ -123,6 +125,15 @@ export function CommandBar({
   useEffect(() => {
     const selectionScope = `${activeWorkspaceId ?? "all"}:${selectedNodeId ?? "none"}:${availableAgents.map((agent) => agent.id).join(",")}`;
     const preferredAgent = resolvePreferredAgentId(snapshot, activeWorkspaceId, selectedNodeId);
+    const createdAgentId = preferredCreatedAgentIdRef.current;
+
+    if (createdAgentId && availableAgents.some((agent) => agent.id === createdAgentId)) {
+      if (targetAgentId !== createdAgentId) {
+        setTargetAgentId(createdAgentId);
+      }
+      preferredCreatedAgentIdRef.current = null;
+      return;
+    }
 
     if (autoSelectionScopeRef.current !== selectionScope) {
       autoSelectionScopeRef.current = selectionScope;
@@ -413,6 +424,26 @@ export function CommandBar({
           ) : (
             <SubtlePill>No agent</SubtlePill>
           )}
+
+          {targetWorkspace ? (
+            <CreateAgentDialog
+              snapshot={snapshot}
+              defaultWorkspaceId={targetWorkspace.id}
+              onRefresh={onRefresh}
+              onAgentCreated={(agentId) => {
+                preferredCreatedAgentIdRef.current = agentId;
+                setTargetAgentId(agentId);
+              }}
+              trigger={
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
+                >
+                  + Create Agent
+                </button>
+              }
+            />
+          ) : null}
 
           <div className="ml-auto flex items-center gap-1">
             <IconButton

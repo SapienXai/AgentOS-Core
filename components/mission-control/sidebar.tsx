@@ -4,6 +4,9 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
+  CreateAgentDialog
+} from "@/components/mission-control/create-agent-dialog";
+import {
   AlertTriangle,
   Bot,
   ChevronLeft,
@@ -94,17 +97,12 @@ export function MissionSidebar({
   const gatewayAddress = snapshot.diagnostics.gatewayUrl
     .replace(/^wss?:\/\//, "")
     .replace(/\/$/, "");
-  const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
   const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
-  const [isCreateAgentAdvancedOpen, setIsCreateAgentAdvancedOpen] = useState(false);
   const [isEditAgentAdvancedOpen, setIsEditAgentAdvancedOpen] = useState(false);
   const [isSavingAgent, setIsSavingAgent] = useState(false);
   const [isEditWorkspaceOpen, setIsEditWorkspaceOpen] = useState(false);
   const [isDeleteWorkspaceOpen, setIsDeleteWorkspaceOpen] = useState(false);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
-  const [createDraft, setCreateDraft] = useState<AgentDraft>(() =>
-    buildAgentDraft(activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? "")
-  );
   const [editDraft, setEditDraft] = useState<AgentDraft | null>(null);
   const [workspaceDraft, setWorkspaceDraft] = useState<WorkspaceDraft | null>(null);
   const [workspaceDeleteTarget, setWorkspaceDeleteTarget] = useState<MissionControlSnapshot["workspaces"][number] | null>(null);
@@ -157,24 +155,6 @@ export function MissionSidebar({
     }
   ];
 
-  useEffect(() => {
-    setCreateDraft((current) => {
-      const availableWorkspaceIds = new Set(snapshot.workspaces.map((workspace) => workspace.id));
-      const preservedWorkspaceId =
-        current.workspaceId && availableWorkspaceIds.has(current.workspaceId) ? current.workspaceId : "";
-      const nextWorkspaceId = (activeWorkspaceId ?? preservedWorkspaceId) || snapshot.workspaces[0]?.id || "";
-
-      if (current.workspaceId === nextWorkspaceId) {
-        return current;
-      }
-
-      return {
-        ...current,
-        workspaceId: nextWorkspaceId
-      };
-    });
-  }, [activeWorkspaceId, snapshot.workspaces]);
-
   const workspaceDeleteAgents = useMemo(() => {
     if (!workspaceDeleteTarget) {
       return [];
@@ -198,14 +178,6 @@ export function MissionSidebar({
 
     return snapshot.runtimes.filter((runtime) => runtime.workspaceId === workspaceDeleteTarget.id);
   }, [workspaceDeleteTarget, snapshot.runtimes]);
-
-  const openCreateAgent = () => {
-    setCreateDraft({
-      ...buildAgentDraft(activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? "")
-    });
-    setIsCreateAgentAdvancedOpen(false);
-    setIsCreateAgentOpen(true);
-  };
 
   const openEditWorkspace = (workspace: MissionControlSnapshot["workspaces"][number]) => {
     setWorkspaceDraft({
@@ -237,38 +209,6 @@ export function MissionSidebar({
     });
     setIsEditAgentAdvancedOpen(false);
     setIsEditAgentOpen(true);
-  };
-
-  const submitCreateAgent = async () => {
-    setIsSavingAgent(true);
-
-    try {
-      const response = await fetch("/api/agents", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(createDraft)
-      });
-
-      const result = (await response.json()) as { error?: string };
-
-      if (!response.ok || result.error) {
-        throw new Error(result.error || "OpenClaw could not create the agent.");
-      }
-
-      toast.success("Agent created in OpenClaw.", {
-        description: createDraft.id
-      });
-      setIsCreateAgentOpen(false);
-      await onRefresh();
-    } catch (error) {
-      toast.error("Agent creation failed.", {
-        description: error instanceof Error ? error.message : "Unknown agent error."
-      });
-    } finally {
-      setIsSavingAgent(false);
-    }
   };
 
   const submitEditAgent = async () => {
@@ -636,258 +576,21 @@ export function MissionSidebar({
                       title="Agents"
                       detail="Create and tune live isolated OpenClaw operators."
                       action={
-                        <Dialog open={isCreateAgentOpen} onOpenChange={setIsCreateAgentOpen}>
-                          <DialogTrigger asChild>
+                        <CreateAgentDialog
+                          snapshot={snapshot}
+                          defaultWorkspaceId={activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? null}
+                          onRefresh={onRefresh}
+                          trigger={
                             <Button
                               variant="secondary"
                               size="sm"
                               className="h-8 rounded-full px-3 text-[11px]"
-                              onClick={openCreateAgent}
                               disabled={snapshot.workspaces.length === 0}
                             >
                               Add
                             </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
-                            <DialogHeader>
-                              <DialogTitle>Create a new OpenClaw agent</DialogTitle>
-                              <DialogDescription>
-                                This creates a real isolated agent bound to an existing workspace with a preset policy.
-                              </DialogDescription>
-                            </DialogHeader>
-
-                            <div className="space-y-5">
-                              <div className="space-y-3">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Agent preset</p>
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                  {AGENT_PRESET_OPTIONS.map((option) => (
-                                    <AgentPresetCard
-                                      key={option.value}
-                                      label={option.label}
-                                      description={option.description}
-                                      active={createDraft.policy.preset === option.value}
-                                      badgeVariant={getAgentPresetMeta(option.value).badgeVariant}
-                                      onClick={() =>
-                                        setCreateDraft((current) => applyAgentPreset(current, option.value))
-                                      }
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-
-                              <AgentPolicySummary policy={createDraft.policy} />
-
-                              <FormField label="Agent id" htmlFor="agent-id">
-                                <Input
-                                  id="agent-id"
-                                  value={createDraft.id}
-                                  onChange={(event) =>
-                                    setCreateDraft((current) => ({
-                                      ...current,
-                                      id: event.target.value
-                                    }))
-                                  }
-                                  placeholder="marketing-agent"
-                                />
-                              </FormField>
-
-                              <FormField label="Display name" htmlFor="agent-name">
-                                <Input
-                                  id="agent-name"
-                                  value={createDraft.name}
-                                  onChange={(event) =>
-                                    setCreateDraft((current) => ({
-                                      ...current,
-                                      name: event.target.value
-                                    }))
-                                  }
-                                  placeholder={getAgentPresetMeta(createDraft.policy.preset).defaultName}
-                                />
-                              </FormField>
-
-                              <FormField label="Workspace" htmlFor="agent-workspace">
-                                <select
-                                  id="agent-workspace"
-                                  value={createDraft.workspaceId}
-                                  onChange={(event) =>
-                                    setCreateDraft((current) => ({
-                                      ...current,
-                                      workspaceId: event.target.value
-                                    }))
-                                  }
-                                  className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
-                                >
-                                  {snapshot.workspaces.map((workspace) => (
-                                    <option key={workspace.id} value={workspace.id}>
-                                      {workspace.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </FormField>
-
-                              <FormField label="Model" htmlFor="agent-model">
-                                <select
-                                  id="agent-model"
-                                  value={createDraft.modelId}
-                                  onChange={(event) =>
-                                    setCreateDraft((current) => ({
-                                      ...current,
-                                      modelId: event.target.value
-                                    }))
-                                  }
-                                  className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
-                                >
-                                  <option value="">Use OpenClaw default</option>
-                                  {snapshot.models.map((model) => (
-                                    <option key={model.id} value={model.id}>
-                                      {model.id}
-                                    </option>
-                                  ))}
-                                </select>
-                              </FormField>
-
-                              <div className="grid gap-4 sm:grid-cols-2">
-                                <FormField label="Emoji" htmlFor="agent-emoji">
-                                  <Input
-                                    id="agent-emoji"
-                                    value={createDraft.emoji}
-                                    onChange={(event) =>
-                                      setCreateDraft((current) => ({
-                                        ...current,
-                                        emoji: event.target.value
-                                      }))
-                                    }
-                                    placeholder={getAgentPresetMeta(createDraft.policy.preset).defaultEmoji}
-                                  />
-                                </FormField>
-                                <FormField label="Theme" htmlFor="agent-theme">
-                                  <Input
-                                    id="agent-theme"
-                                    value={createDraft.theme}
-                                    onChange={(event) =>
-                                      setCreateDraft((current) => ({
-                                        ...current,
-                                        theme: event.target.value
-                                      }))
-                                    }
-                                    placeholder={getAgentPresetMeta(createDraft.policy.preset).defaultTheme}
-                                  />
-                                </FormField>
-                              </div>
-
-                              <FormField label="Avatar URL" htmlFor="agent-avatar">
-                                <Input
-                                  id="agent-avatar"
-                                  value={createDraft.avatar}
-                                  onChange={(event) =>
-                                    setCreateDraft((current) => ({
-                                      ...current,
-                                      avatar: event.target.value
-                                    }))
-                                  }
-                                  placeholder="https://example.com/avatar.png"
-                                />
-                              </FormField>
-
-                              <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
-                                <div className="flex items-center justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-medium text-white">Advanced policy</p>
-                                    <p className="mt-1 text-xs leading-5 text-slate-400">
-                                      Override missing-tool behavior, install scope, file access, and network posture.
-                                    </p>
-                                  </div>
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    className="h-8 rounded-full px-3 text-[11px]"
-                                    onClick={() => setIsCreateAgentAdvancedOpen((current) => !current)}
-                                  >
-                                    {isCreateAgentAdvancedOpen ? "Hide" : "Show"}
-                                  </Button>
-                                </div>
-
-                                {isCreateAgentAdvancedOpen ? (
-                                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                                    <AgentPolicySelect
-                                      label="Missing tool behavior"
-                                      htmlFor="create-agent-missing-tools"
-                                      value={createDraft.policy.missingToolBehavior}
-                                      options={AGENT_MISSING_TOOL_BEHAVIOR_OPTIONS}
-                                      onChange={(value) =>
-                                        setCreateDraft((current) => ({
-                                          ...current,
-                                          policy: {
-                                            ...current.policy,
-                                            missingToolBehavior: value
-                                          }
-                                        }))
-                                      }
-                                    />
-                                    <AgentPolicySelect
-                                      label="Install scope"
-                                      htmlFor="create-agent-install-scope"
-                                      value={createDraft.policy.installScope}
-                                      options={AGENT_INSTALL_SCOPE_OPTIONS}
-                                      onChange={(value) =>
-                                        setCreateDraft((current) => ({
-                                          ...current,
-                                          policy: {
-                                            ...current.policy,
-                                            installScope: value
-                                          }
-                                        }))
-                                      }
-                                    />
-                                    <AgentPolicySelect
-                                      label="File access"
-                                      htmlFor="create-agent-file-access"
-                                      value={createDraft.policy.fileAccess}
-                                      options={AGENT_FILE_ACCESS_OPTIONS}
-                                      onChange={(value) =>
-                                        setCreateDraft((current) => ({
-                                          ...current,
-                                          policy: {
-                                            ...current.policy,
-                                            fileAccess: value
-                                          }
-                                        }))
-                                      }
-                                    />
-                                    <AgentPolicySelect
-                                      label="Network access"
-                                      htmlFor="create-agent-network-access"
-                                      value={createDraft.policy.networkAccess}
-                                      options={AGENT_NETWORK_ACCESS_OPTIONS}
-                                      onChange={(value) =>
-                                        setCreateDraft((current) => ({
-                                          ...current,
-                                          policy: {
-                                            ...current.policy,
-                                            networkAccess: value
-                                          }
-                                        }))
-                                      }
-                                    />
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-
-                            <DialogFooter>
-                              <Button variant="secondary" onClick={() => setIsCreateAgentOpen(false)}>
-                                Cancel
-                              </Button>
-                              <Button
-                                onClick={submitCreateAgent}
-                                disabled={isSavingAgent || !createDraft.id.trim() || !createDraft.workspaceId}
-                              >
-                                {isSavingAgent ? "Creating…" : "Create agent"}
-                              </Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
+                          }
+                        />
                       }
                     />
 
