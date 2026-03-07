@@ -998,7 +998,7 @@ export function MissionSidebar({
                   <div className="space-y-1.5 text-sm text-rose-50">
                     <p className="font-medium">This action cannot be undone.</p>
                     <p className="text-rose-100/80">
-                      OpenClaw will delete this agent, remove its config entry, and prune agent-specific workspace metadata.
+                      OpenClaw will delete this agent, remove its config entry, remove its manifest record, and clean up agent-specific policy/state files. Shared workspace docs and files will remain.
                     </p>
                   </div>
                 </div>
