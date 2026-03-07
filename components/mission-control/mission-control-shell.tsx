@@ -153,26 +153,33 @@ export function MissionControlShell({
           >
             <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
 
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-2 pt-2 lg:px-0 lg:pt-6">
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between px-2 pt-2 lg:px-0 lg:pt-6">
               <div
                 className={cn(
-                  "rounded-[20px] border px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.28)] backdrop-blur-xl",
+                  "flex h-11 items-center gap-3 rounded-full border px-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl",
                   surfaceTheme === "light"
-                    ? "border-[#d9c9bc]/90 bg-[#f8f5f0]/88 shadow-[0_18px_42px_rgba(161,125,101,0.14)]"
-                    : "border-white/[0.08] bg-slate-950/55"
+                    ? "border-[#d9c9bc]/90 bg-[#f8f5f0]/86 shadow-[0_18px_42px_rgba(161,125,101,0.14)]"
+                    : "border-cyan-300/10 bg-slate-950/45"
                 )}
               >
                 <p
                   className={cn(
-                    "text-[11px] uppercase tracking-[0.28em]",
+                    "text-[10px] uppercase tracking-[0.3em]",
                     surfaceTheme === "light" ? "text-[#8a7261]" : "text-slate-500"
                   )}
                 >
                   Canvas
                 </p>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "h-4 w-px",
+                    surfaceTheme === "light" ? "bg-[#cdb7a8]/80" : "bg-white/[0.08]"
+                  )}
+                />
                 <h2
                   className={cn(
-                    "mt-1 font-display text-[1.08rem]",
+                    "font-display text-[0.98rem]",
                     surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
                   )}
                 >
@@ -182,7 +189,7 @@ export function MissionControlShell({
 
               <div
                 className={cn(
-                  "pointer-events-auto hidden items-center gap-3 rounded-full border px-3 py-2 text-[10px] uppercase tracking-[0.3em] shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl lg:flex",
+                  "pointer-events-auto hidden h-11 items-center gap-3 rounded-full border px-4 text-[10px] uppercase tracking-[0.3em] shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl lg:flex",
                   surfaceTheme === "light"
                     ? "border-[#d9c9bc]/90 bg-[#f8f5f0]/86 text-[#8a7261] shadow-[0_18px_42px_rgba(161,125,101,0.14)]"
                     : "border-cyan-300/10 bg-slate-950/45 text-slate-400"
