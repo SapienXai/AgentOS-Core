@@ -118,7 +118,8 @@ export function MissionCanvas({
     setNodes((previousNodes) =>
       previousNodes.map((node) => ({
         ...node,
-        selected: node.id === selectedNodeId
+        selected: node.id === selectedNodeId,
+        zIndex: resolveNodeZIndex(node, selectedNodeId)
       }))
     );
   }, [selectedNodeId, setNodes]);
@@ -435,6 +436,30 @@ function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]
       height: previous.height
     };
   });
+}
+
+function resolveNodeZIndex(node: CanvasNode, selectedNodeId: string | null) {
+  if (node.type === "workspace") {
+    return 0;
+  }
+
+  if (node.type === "agent") {
+    return 10;
+  }
+
+  if (node.id === selectedNodeId) {
+    return 60;
+  }
+
+  if (node.data.pendingCreation) {
+    return 40;
+  }
+
+  if (node.data.justCreated) {
+    return 28;
+  }
+
+  return 10;
 }
 
 function markRuntimeAsJustCreated(
