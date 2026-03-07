@@ -8,6 +8,18 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { createFallbackSnapshot } from "@/lib/openclaw/fallback";
+import {
+  DEFAULT_AGENT_PRESET,
+  formatAgentPresetLabel,
+  getAgentPresetMeta,
+  inferAgentPresetFromContext,
+  isAgentFileAccess,
+  isAgentInstallScope,
+  isAgentMissingToolBehavior,
+  isAgentNetworkAccess,
+  isAgentPreset,
+  resolveAgentPolicy
+} from "@/lib/openclaw/agent-presets";
 import { detectOpenClaw, runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
 import {
   DEFAULT_WORKSPACE_RULES,
@@ -16,6 +28,7 @@ import {
 } from "@/lib/openclaw/workspace-presets";
 import type {
   AgentCreateInput,
+  AgentPolicy,
   AgentStatus,
   AgentUpdateInput,
   MissionControlSnapshot,
@@ -183,6 +196,21 @@ type MissionCommandPayload = {
 };
 
 type AgentBootstrapProfile = OpenClawAgent["profile"];
+type WorkspaceProjectManifestAgent = {
+  id: string;
+  name: string | null;
+  role: string | null;
+  isPrimary: boolean;
+  skillId: string | null;
+  modelId: string | null;
+  policy: AgentPolicy | null;
+};
+type WorkspaceProjectManifest = {
+  template: WorkspaceTemplate | null;
+  sourceMode: WorkspaceSourceMode | null;
+  agentTemplate: string | null;
+  agents: WorkspaceProjectManifestAgent[];
+};
 type SessionTranscriptEntry = {
   type?: string;
   id?: string;
@@ -281,6 +309,7 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
 
     const workspaceByPath = new Map<string, WorkspaceProject>();
     const profileByWorkspace = new Map<string, AgentBootstrapProfile>();
+    const manifestByWorkspace = new Map<string, WorkspaceProjectManifest>();
     const agents: OpenClawAgent[] = [];
     const relationships: RelationshipRecord[] = [];
 
@@ -312,13 +341,31 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
       const configured = configByAgent.get(rawAgent.id);
       const workspaceId = workspaceIdFromPath(rawAgent.workspace);
       const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
+      const manifest =
+        manifestByWorkspace.get(rawAgent.workspace) ??
+        (await readWorkspaceProjectManifest(rawAgent.workspace));
+      manifestByWorkspace.set(rawAgent.workspace, manifest);
+      const manifestAgent = manifest.agents.find((entry) => entry.id === rawAgent.id) ?? null;
+      const configuredSkills = filterAgentPolicySkills(configured?.skills ?? []);
+      const policy =
+        manifestAgent?.policy ??
+        resolveAgentPolicy(
+          inferAgentPresetFromContext({
+            skills: configuredSkills,
+            id: rawAgent.id,
+            name: rawAgent.name || rawAgent.identityName || configured?.name || rawAgent.id
+          }),
+          {
+            fileAccess: configured?.tools?.fs?.workspaceOnly ? "workspace-only" : "extended"
+          }
+        );
       const primaryModel = rawAgent.model || configured?.model || "unassigned";
       const profile =
         profileByWorkspace.get(rawAgent.workspace) ??
         (await readAgentBootstrapProfile(rawAgent.workspace, {
           agentId: rawAgent.id,
           agentName: rawAgent.name || rawAgent.identityName || configured?.name || rawAgent.id,
-          configuredSkills: configured?.skills ?? [],
+          configuredSkills,
           configuredTools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : []
         }));
       profileByWorkspace.set(rawAgent.workspace, profile);
@@ -374,8 +421,9 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
           source: rawAgent.identitySource
         },
         profile,
-        skills: configured?.skills ?? [],
-        tools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : []
+        skills: configuredSkills,
+        tools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : [],
+        policy
       };
 
       agents.push(agent);
@@ -536,10 +584,17 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
           path: missionAgent.workspacePath
         }
       : null);
+  const workspaceAgents = missionWorkspace
+    ? snapshot.agents.filter((entry) => entry.workspaceId === missionWorkspace.id)
+    : [];
+  const setupAgentId =
+    workspaceAgents.find((entry) => entry.policy.preset === "setup" && entry.id !== missionAgent?.id)?.id ?? null;
   const outputPlan = missionWorkspace
     ? await prepareMissionOutputPlan(missionWorkspace.path, mission)
     : null;
-  const routedMission = outputPlan ? composeMissionWithOutputRouting(mission, outputPlan) : mission;
+  const routedMission = outputPlan
+    ? composeMissionWithOutputRouting(mission, outputPlan, missionAgent?.policy, setupAgentId)
+    : mission;
 
   const payload = await runOpenClawJson<MissionCommandPayload>([
     "agent",
@@ -717,6 +772,14 @@ export async function createAgent(input: AgentCreateInput) {
     throw new Error("Workspace was not found for this agent.");
   }
 
+  const policy = resolveAgentPolicy(input.policy?.preset ?? DEFAULT_AGENT_PRESET, input.policy);
+  const presetMeta = getAgentPresetMeta(policy.preset);
+  const displayName = normalizeOptionalValue(input.name) ?? presetMeta.defaultName;
+  const emoji = normalizeOptionalValue(input.emoji) ?? presetMeta.defaultEmoji;
+  const theme = normalizeOptionalValue(input.theme) ?? presetMeta.defaultTheme;
+  const setupAgentId =
+    snapshot.agents.find((entry) => entry.workspaceId === workspace.id && entry.policy.preset === "setup")?.id ?? null;
+
   const args = [
     "agents",
     "add",
@@ -735,16 +798,43 @@ export async function createAgent(input: AgentCreateInput) {
 
   await runOpenClaw(args);
 
+  const policySkillId = await ensureAgentPolicySkill({
+    workspacePath: workspace.path,
+    agentId,
+    agentName: displayName,
+    policy,
+    setupAgentId
+  });
+
   const configEntry = await upsertAgentConfigEntry(agentId, workspace.path, {
-    name: normalizeOptionalValue(input.name),
-    model: normalizeOptionalValue(input.modelId)
+    name: displayName,
+    model: normalizeOptionalValue(input.modelId),
+    skills: [policySkillId],
+    tools:
+      policy.fileAccess === "workspace-only"
+        ? {
+            fs: {
+              workspaceOnly: true
+            }
+          }
+        : null
   });
 
   await applyAgentIdentity(agentId, workspace.path, {
-    name: normalizeOptionalValue(input.name) ?? configEntry.name,
-    emoji: normalizeOptionalValue(input.emoji),
-    theme: normalizeOptionalValue(input.theme),
+    name: displayName || configEntry.name,
+    emoji,
+    theme,
     avatar: normalizeOptionalValue(input.avatar)
+  });
+
+  await upsertWorkspaceProjectAgentMetadata(workspace.path, {
+    id: agentId,
+    name: displayName,
+    role: formatAgentPresetLabel(policy.preset),
+    skillId: policySkillId,
+    modelId: normalizeOptionalValue(input.modelId),
+    isPrimary: false,
+    policy
   });
 
   snapshotCache = null;
@@ -777,16 +867,48 @@ export async function updateAgent(input: AgentUpdateInput) {
     throw new Error("Workspace was not found for this agent.");
   }
 
+  const policy = resolveAgentPolicy(input.policy?.preset ?? agent.policy.preset, input.policy ?? agent.policy);
+  const currentName = normalizeOptionalValue(agent.name);
+  const currentEmoji = normalizeOptionalValue(agent.identity.emoji);
+  const currentTheme = normalizeOptionalValue(agent.identity.theme);
+  const setupAgentId =
+    snapshot.agents.find((entry) => entry.workspaceId === workspace.id && entry.policy.preset === "setup" && entry.id !== agentId)?.id ??
+    null;
+  const policySkillId = await ensureAgentPolicySkill({
+    workspacePath: workspace.path,
+    agentId,
+    agentName: normalizeOptionalValue(input.name) ?? currentName ?? agentId,
+    policy,
+    setupAgentId
+  });
+
   const configEntry = await upsertAgentConfigEntry(agentId, workspace.path, {
     name: normalizeOptionalValue(input.name),
-    model: normalizeOptionalValue(input.modelId)
+    model: normalizeOptionalValue(input.modelId),
+    skills: [...agent.skills, policySkillId],
+    tools:
+      policy.fileAccess === "workspace-only"
+        ? {
+            fs: {
+              workspaceOnly: true
+            }
+          }
+        : null
   });
 
   await applyAgentIdentity(agentId, workspace.path, {
     name: normalizeOptionalValue(input.name) ?? configEntry.name,
-    emoji: normalizeOptionalValue(input.emoji),
-    theme: normalizeOptionalValue(input.theme),
+    emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
+    theme: normalizeOptionalValue(input.theme) ?? currentTheme,
     avatar: normalizeOptionalValue(input.avatar)
+  });
+
+  await upsertWorkspaceProjectAgentMetadata(workspace.path, {
+    id: agentId,
+    name: normalizeOptionalValue(input.name) ?? currentName ?? configEntry.name ?? agentId,
+    modelId: normalizeOptionalValue(input.modelId) ?? (agent.modelId === "unassigned" ? null : agent.modelId),
+    isPrimary: agent.isDefault,
+    policy
   });
 
   snapshotCache = null;
@@ -832,7 +954,6 @@ export async function createWorkspaceProject(input: WorkspaceCreateInput): Promi
       workspacePath: targetDir,
       workspaceSlug: normalized.slug,
       workspaceModelId: normalized.modelId,
-      workspaceOnly: normalized.rules.workspaceOnly,
       agent
     });
     createdAgentIds.push(createdAgentId);
@@ -1072,7 +1193,8 @@ async function scaffoldWorkspaceContents(
           role: agent.role,
           isPrimary: Boolean(agent.isPrimary),
           skillId: normalizeOptionalValue(agent.skillId) ?? null,
-          modelId: normalizeOptionalValue(agent.modelId) ?? null
+          modelId: normalizeOptionalValue(agent.modelId) ?? null,
+          policy: agent.policy ?? null
         }))
       },
       null,
@@ -1188,12 +1310,19 @@ async function createBootstrappedWorkspaceAgent(params: {
   workspacePath: string;
   workspaceSlug: string;
   workspaceModelId?: string;
-  workspaceOnly: boolean;
   agent: WorkspaceAgentBlueprintInput;
 }) {
   const agentId = createWorkspaceAgentId(params.workspaceSlug, params.agent.id);
   const modelId =
     normalizeOptionalValue(params.agent.modelId) ?? normalizeOptionalValue(params.workspaceModelId);
+  const policy = resolveAgentPolicy(
+    params.agent.policy?.preset ?? inferAgentPresetFromContext({
+      skills: params.agent.skillId ? [params.agent.skillId] : [],
+      id: agentId,
+      name: params.agent.name
+    }),
+    params.agent.policy
+  );
   const args = [
     "agents",
     "add",
@@ -1212,11 +1341,18 @@ async function createBootstrappedWorkspaceAgent(params: {
 
   await runOpenClaw(args);
 
+  const policySkillId = await ensureAgentPolicySkill({
+    workspacePath: params.workspacePath,
+    agentId,
+    agentName: params.agent.name,
+    policy
+  });
+
   const configEntry = await upsertAgentConfigEntry(agentId, params.workspacePath, {
     name: normalizeOptionalValue(params.agent.name),
     model: modelId,
-    skills: params.agent.skillId ? [params.agent.skillId] : [],
-    tools: params.workspaceOnly
+    skills: [normalizeOptionalValue(params.agent.skillId), policySkillId].filter((value): value is string => Boolean(value)),
+    tools: policy.fileAccess === "workspace-only"
       ? {
           fs: {
             workspaceOnly: true
@@ -1298,7 +1434,19 @@ function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWo
     theme: normalizeOptionalValue(agent.theme),
     skillId: normalizeOptionalValue(agent.skillId),
     modelId: normalizeOptionalValue(agent.modelId),
-    isPrimary: Boolean(agent.isPrimary)
+    isPrimary: Boolean(agent.isPrimary),
+    policy: resolveAgentPolicy(
+      agent.policy?.preset ??
+        inferAgentPresetFromContext({
+          skills: agent.skillId ? [agent.skillId] : [],
+          id: agent.id,
+          name: agent.name
+        }),
+      {
+        ...agent.policy,
+        fileAccess: rules.workspaceOnly ? agent.policy?.fileAccess ?? "workspace-only" : "extended"
+      }
+    )
   }));
 
   if (!normalizedAgents.some((agent) => agent.enabled && agent.isPrimary)) {
@@ -1437,6 +1585,11 @@ async function writeTextFileIfMissing(filePath: string, contents: string) {
   }
 }
 
+async function writeTextFileEnsured(filePath: string, contents: string) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, contents, "utf8");
+}
+
 async function detectWorkspaceToolExamples(workspacePath: string) {
   const examples: string[] = [];
   const packageExamples = await detectPackageExamples(workspacePath);
@@ -1528,8 +1681,12 @@ function composeMissionWithOutputRouting(
   outputPlan: {
     relativeOutputDir: string;
     notesDirRelative: string;
-  }
+  },
+  policy?: AgentPolicy,
+  setupAgentId?: string | null
 ) {
+  const resolvedPolicy = policy ?? resolveAgentPolicy(DEFAULT_AGENT_PRESET);
+
   return [
     mission,
     "",
@@ -1538,8 +1695,77 @@ function composeMissionWithOutputRouting(
     `- If a file is requested, default to \`${outputPlan.relativeOutputDir}/<descriptive-file-name>\` unless the user explicitly asks for another path.`,
     `- Use \`${outputPlan.notesDirRelative}/\` only for temporary notes or durable workspace memory, not final deliverables.`,
     "- Avoid writing final artifacts to the workspace root.",
-    "- Only update shared workspace docs when the change is durable and workspace-wide; task-specific docs should stay inside this run folder."
+    "- Only update shared workspace docs when the change is durable and workspace-wide; task-specific docs should stay inside this run folder.",
+    "",
+    "Agent operating policy:",
+    ...buildAgentPolicyPromptLines(resolvedPolicy, setupAgentId)
   ].join("\n");
+}
+
+function buildAgentPolicyPromptLines(policy: AgentPolicy, setupAgentId?: string | null) {
+  const lines: string[] = [
+    `- Preset: ${formatAgentPresetLabel(policy.preset)}.`
+  ];
+
+  if (policy.preset === "browser") {
+    lines.push("- Prefer browser-native evidence capture, screenshots, and reproducible user-path validation.");
+  } else if (policy.preset === "setup") {
+    lines.push("- Prepare the environment, unblock other agents, and keep mutations minimal and explicit.");
+  } else if (policy.preset === "worker") {
+    lines.push("- Focus on producing deliverables, reviews, analysis, or code without unnecessary environment mutation.");
+  } else {
+    lines.push("- Operate with the selected policy, keep artifacts reviewable, and avoid surprising side effects.");
+  }
+
+  switch (policy.missingToolBehavior) {
+    case "fallback":
+      lines.push(
+        "- If required tooling is unavailable, do not install it. Produce the closest viable fallback artifact, such as .md or .txt, and state the limitation."
+      );
+      break;
+    case "ask-setup":
+      lines.push(
+        "- If required tooling is unavailable, stop before installing anything and report the missing capability clearly."
+      );
+      break;
+    case "route-setup":
+      lines.push(
+        setupAgentId
+          ? `- If required tooling is unavailable, do not install it yourself. Leave a concrete handoff for setup agent \`${setupAgentId}\` with the exact missing tools or commands.`
+          : "- If required tooling is unavailable, do not install it yourself. Leave a concrete setup handoff with the exact missing tools or commands."
+      );
+      break;
+    case "allow-install":
+      lines.push("- If required tooling is unavailable, you may install it when the install scope below permits it.");
+      break;
+  }
+
+  switch (policy.installScope) {
+    case "none":
+      lines.push("- Install scope: none. Do not run package installation commands.");
+      break;
+    case "workspace":
+      lines.push(
+        "- Install scope: workspace only. Limit installs to project-local or workspace-local dependencies and avoid system package managers."
+      );
+      break;
+    case "system":
+      lines.push("- Install scope: system. System-wide installs are allowed when necessary, but keep them minimal and report what changed.");
+      break;
+  }
+
+  lines.push(
+    policy.fileAccess === "workspace-only"
+      ? "- File access: workspace only. Keep file operations inside the attached workspace."
+      : "- File access: extended. Prefer the workspace, but you may touch adjacent paths when the task explicitly needs them."
+  );
+  lines.push(
+    policy.networkAccess === "enabled"
+      ? "- Network access: enabled when the task requires external information or downloads."
+      : "- Network access: restricted. Avoid network access unless the task explicitly depends on it."
+  );
+
+  return lines;
 }
 
 async function detectPackageManager(workspacePath: string, declaredPackageManager?: string) {
@@ -1597,6 +1823,33 @@ function buildWorkspaceAgentStatePath(workspacePath: string, agentId: string) {
   return path.join(workspacePath, ".openclaw", "agents", agentId, "agent");
 }
 
+function buildAgentPolicySkillId(agentId: string) {
+  return `agent-policy-${slugify(agentId) || "agent"}`;
+}
+
+function isAgentPolicySkillId(skillId: string | undefined) {
+  return Boolean(skillId && /^agent-policy-/.test(skillId));
+}
+
+function filterAgentPolicySkills(skills: string[]) {
+  return skills.filter((skillId) => !isAgentPolicySkillId(skillId));
+}
+
+async function ensureAgentPolicySkill(params: {
+  workspacePath: string;
+  agentId: string;
+  agentName: string;
+  policy: AgentPolicy;
+  setupAgentId?: string | null;
+}) {
+  const skillId = buildAgentPolicySkillId(params.agentId);
+  await writeTextFileEnsured(
+    path.join(params.workspacePath, "skills", skillId, "SKILL.md"),
+    `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId)}\n`
+  );
+  return skillId;
+}
+
 function renderAgentsMarkdown(params: {
   name: string;
   brief?: string;
@@ -1607,7 +1860,10 @@ function renderAgentsMarkdown(params: {
 }) {
   const templateMeta = getWorkspaceTemplateMeta(params.template);
   const teamLines = params.agents.map(
-    (agent) => `- ${agent.role}: ${agent.name}${agent.skillId ? ` · skill ${agent.skillId}` : ""}`
+    (agent) =>
+      `- ${agent.role}: ${agent.name}${agent.skillId ? ` · skill ${agent.skillId}` : ""}${
+        agent.policy ? ` · ${formatAgentPresetLabel(agent.policy.preset)}` : ""
+      }`
   );
 
   return `# ${params.name}
@@ -1630,6 +1886,8 @@ ${params.brief || "Clarify the project goal, definition of done, constraints, an
 - Prefer direct, reviewable changes over speculative rewrites.
 - Preserve user work and avoid destructive actions without clear approval.
 - Update durable docs when stable architecture, workflow, or product decisions change.
+- Worker and browser agents should not install tooling unless their explicit policy allows it.
+- Route environment preparation to setup-oriented agents when the work depends on new tooling.
 
 ## Daily memory
 - Capture durable facts in MEMORY.md and memory/*.md.
@@ -1924,6 +2182,25 @@ Use this skill when operating in the current workspace.
 - Keep outputs specific, reviewable, and easy for other agents to extend.
 `;
   }
+}
+
+function renderAgentPolicySkillMarkdown(agentName: string, policy: AgentPolicy, setupAgentId?: string | null) {
+  const presetLabel = formatAgentPresetLabel(policy.preset);
+
+  return `# ${agentName} Policy
+
+Preset: ${presetLabel}
+
+## Output routing
+- Final deliverables belong in the current deliverables run folder for the task.
+- Keep temporary notes and durable workspace memory inside memory/.
+- Avoid writing final artifacts to the workspace root unless the task explicitly asks for it.
+
+## Operating rules
+${buildAgentPolicyPromptLines(policy, setupAgentId)
+  .map((line) => line.replace(/^- /, "- "))
+  .join("\n")}
+`;
 }
 
 function buildWorkspaceKickoffPrompt(template: WorkspaceTemplate, brief?: string) {
@@ -2624,7 +2901,9 @@ async function listLocalWorkspaceSkills(workspacePath: string) {
         })
     );
 
-    return localSkills.filter((entry): entry is string => Boolean(entry)).sort((left, right) => left.localeCompare(right));
+    return localSkills
+      .filter((entry): entry is string => typeof entry === "string" && !isAgentPolicySkillId(entry))
+      .sort((left, right) => left.localeCompare(right));
   } catch {
     return [];
   }
@@ -2635,20 +2914,82 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
 
   try {
     const raw = await readFile(projectFilePath, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const candidate = JSON.parse(raw);
+    const parsed = isObjectRecord(candidate) ? candidate : {};
+    const agents = Array.isArray(parsed.agents)
+      ? parsed.agents
+          .map((entry) => parseWorkspaceProjectManifestAgent(entry))
+          .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
+      : [];
 
     return {
       template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
       sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null,
-      agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null
+      agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null,
+      agents
     };
   } catch {
     return {
       template: null,
       sourceMode: null,
-      agentTemplate: null
+      agentTemplate: null,
+      agents: []
     };
   }
+}
+
+async function upsertWorkspaceProjectAgentMetadata(
+  workspacePath: string,
+  agent: {
+    id: string;
+    name?: string | null;
+    role?: string | null;
+    isPrimary?: boolean;
+    skillId?: string | null;
+    modelId?: string | null;
+    policy: AgentPolicy;
+  }
+) {
+  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
+  let parsed: Record<string, unknown> = {};
+  let existingAgent: WorkspaceProjectManifestAgent | null = null;
+
+  try {
+    const raw = await readFile(projectFilePath, "utf8");
+    const candidate = JSON.parse(raw);
+    parsed = isObjectRecord(candidate) ? candidate : {};
+    if (Array.isArray(parsed.agents)) {
+      existingAgent =
+        parsed.agents
+          .map((entry) => parseWorkspaceProjectManifestAgent(entry))
+          .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
+          .find((entry) => entry.id === agent.id) ?? null;
+    }
+  } catch {
+    parsed = {};
+  }
+
+  const nextAgent = {
+    id: agent.id,
+    name: agent.name ?? existingAgent?.name ?? null,
+    role: agent.role ?? existingAgent?.role ?? null,
+    isPrimary: agent.isPrimary ?? existingAgent?.isPrimary ?? false,
+    skillId: agent.skillId ?? existingAgent?.skillId ?? null,
+    modelId: agent.modelId ?? existingAgent?.modelId ?? null,
+    policy: agent.policy
+  };
+  const agents = Array.isArray(parsed.agents)
+    ? parsed.agents.filter((entry) => isObjectRecord(entry) && typeof entry.id === "string" && entry.id !== agent.id)
+    : [];
+
+  agents.push(nextAgent);
+  parsed.version = typeof parsed.version === "number" ? parsed.version : 1;
+  parsed.slug = typeof parsed.slug === "string" ? parsed.slug : slugify(path.basename(workspacePath));
+  parsed.name = typeof parsed.name === "string" ? parsed.name : path.basename(workspacePath);
+  parsed.updatedAt = new Date().toISOString();
+  parsed.agents = agents;
+
+  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
 async function pathMatchesKind(targetPath: string, kind: "file" | "directory") {
@@ -2672,6 +3013,50 @@ function isWorkspaceTemplate(value: unknown): value is WorkspaceTemplate {
 
 function isWorkspaceSourceMode(value: unknown): value is WorkspaceSourceMode {
   return value === "empty" || value === "clone" || value === "existing";
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseWorkspaceProjectManifestAgent(value: unknown): WorkspaceProjectManifestAgent | null {
+  if (!isObjectRecord(value) || typeof value.id !== "string") {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    name: typeof value.name === "string" ? value.name : null,
+    role: typeof value.role === "string" ? value.role : null,
+    isPrimary: Boolean(value.isPrimary),
+    skillId: typeof value.skillId === "string" ? value.skillId : null,
+    modelId: typeof value.modelId === "string" ? value.modelId : null,
+    policy: parseAgentPolicy(value.policy)
+  };
+}
+
+function parseAgentPolicy(value: unknown): AgentPolicy | null {
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+
+  if (
+    !isAgentPreset(value.preset) ||
+    !isAgentMissingToolBehavior(value.missingToolBehavior) ||
+    !isAgentInstallScope(value.installScope) ||
+    !isAgentFileAccess(value.fileAccess) ||
+    !isAgentNetworkAccess(value.networkAccess)
+  ) {
+    return null;
+  }
+
+  return {
+    preset: value.preset,
+    missingToolBehavior: value.missingToolBehavior,
+    installScope: value.installScope,
+    fileAccess: value.fileAccess,
+    networkAccess: value.networkAccess
+  };
 }
 
 function extractPurpose(sections: Map<string, string[]>) {

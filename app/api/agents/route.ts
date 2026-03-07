@@ -6,6 +6,14 @@ import { createAgent, getMissionControlSnapshot, updateAgent } from "@/lib/openc
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const agentPolicySchema = z.object({
+  preset: z.enum(["worker", "setup", "browser", "custom"]),
+  missingToolBehavior: z.enum(["fallback", "ask-setup", "route-setup", "allow-install"]),
+  installScope: z.enum(["none", "workspace", "system"]),
+  fileAccess: z.enum(["workspace-only", "extended"]),
+  networkAccess: z.enum(["restricted", "enabled"])
+});
+
 const createAgentSchema = z.object({
   id: z.string().min(1),
   workspaceId: z.string().min(1),
@@ -13,7 +21,8 @@ const createAgentSchema = z.object({
   name: z.string().optional(),
   emoji: z.string().optional(),
   theme: z.string().optional(),
-  avatar: z.string().optional()
+  avatar: z.string().optional(),
+  policy: agentPolicySchema.optional()
 });
 
 const updateAgentSchema = z.object({
@@ -23,7 +32,8 @@ const updateAgentSchema = z.object({
   name: z.string().optional(),
   emoji: z.string().optional(),
   theme: z.string().optional(),
-  avatar: z.string().optional()
+  avatar: z.string().optional(),
+  policy: agentPolicySchema.optional()
 });
 
 export async function GET() {

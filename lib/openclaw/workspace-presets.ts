@@ -1,3 +1,4 @@
+import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import type {
   WorkspaceAgentBlueprintInput,
   WorkspaceCreateRules,
@@ -354,6 +355,7 @@ export function buildDefaultWorkspaceAgents(
       {
         ...primary,
         name: primary.role === "Builder" ? "Default Agent" : primary.name,
+        policy: resolveAgentPolicy(primary.id === "browser" ? "browser" : "worker"),
         enabled: true
       }
     ];
@@ -363,13 +365,14 @@ export function buildDefaultWorkspaceAgents(
     id: entry.id,
     role: entry.role,
     name: entry.name,
-    emoji: entry.emoji,
-    theme: entry.theme,
-    skillId: entry.skillId,
-    modelId: entry.modelId,
-    isPrimary: Boolean(entry.isPrimary),
-    enabled: true
-  }));
+      emoji: entry.emoji,
+      theme: entry.theme,
+      skillId: entry.skillId,
+      modelId: entry.modelId,
+      isPrimary: Boolean(entry.isPrimary),
+      policy: resolveAgentPolicy(entry.id === "browser" ? "browser" : "worker"),
+      enabled: true
+    }));
 }
 
 export function buildWorkspaceScaffoldPreview(

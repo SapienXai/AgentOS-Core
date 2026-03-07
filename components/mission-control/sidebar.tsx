@@ -29,8 +29,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/sonner";
+import {
+  AGENT_FILE_ACCESS_OPTIONS,
+  AGENT_INSTALL_SCOPE_OPTIONS,
+  AGENT_MISSING_TOOL_BEHAVIOR_OPTIONS,
+  AGENT_NETWORK_ACCESS_OPTIONS,
+  AGENT_PRESET_OPTIONS,
+  formatAgentFileAccessLabel,
+  formatAgentInstallScopeLabel,
+  formatAgentMissingToolBehaviorLabel,
+  formatAgentNetworkAccessLabel,
+  formatAgentPresetLabel,
+  getAgentPresetMeta,
+  resolveAgentPolicy
+} from "@/lib/openclaw/agent-presets";
 import { compactPath, formatContextWindow, formatModelLabel, toneForHealth } from "@/lib/openclaw/presenters";
-import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
 type AgentDraft = {
@@ -41,6 +55,7 @@ type AgentDraft = {
   emoji: string;
   theme: string;
   avatar: string;
+  policy: AgentPolicy;
 };
 
 type WorkspaceDraft = {
@@ -81,19 +96,15 @@ export function MissionSidebar({
     .replace(/\/$/, "");
   const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
   const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
+  const [isCreateAgentAdvancedOpen, setIsCreateAgentAdvancedOpen] = useState(false);
+  const [isEditAgentAdvancedOpen, setIsEditAgentAdvancedOpen] = useState(false);
   const [isSavingAgent, setIsSavingAgent] = useState(false);
   const [isEditWorkspaceOpen, setIsEditWorkspaceOpen] = useState(false);
   const [isDeleteWorkspaceOpen, setIsDeleteWorkspaceOpen] = useState(false);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
-  const [createDraft, setCreateDraft] = useState<AgentDraft>(() => ({
-    id: "",
-    workspaceId: activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? "",
-    modelId: "",
-    name: "",
-    emoji: "",
-    theme: "",
-    avatar: ""
-  }));
+  const [createDraft, setCreateDraft] = useState<AgentDraft>(() =>
+    buildAgentDraft(activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? "")
+  );
   const [editDraft, setEditDraft] = useState<AgentDraft | null>(null);
   const [workspaceDraft, setWorkspaceDraft] = useState<WorkspaceDraft | null>(null);
   const [workspaceDeleteTarget, setWorkspaceDeleteTarget] = useState<MissionControlSnapshot["workspaces"][number] | null>(null);
@@ -190,14 +201,9 @@ export function MissionSidebar({
 
   const openCreateAgent = () => {
     setCreateDraft({
-      id: "",
-      workspaceId: activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? "",
-      modelId: "",
-      name: "",
-      emoji: "",
-      theme: "",
-      avatar: ""
+      ...buildAgentDraft(activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? "")
     });
+    setIsCreateAgentAdvancedOpen(false);
     setIsCreateAgentOpen(true);
   };
 
@@ -219,14 +225,17 @@ export function MissionSidebar({
 
   const openEditAgent = (agent: MissionControlSnapshot["agents"][number]) => {
     setEditDraft({
-      id: agent.id,
-      workspaceId: agent.workspaceId,
-      modelId: agent.modelId === "unassigned" ? "" : agent.modelId,
-      name: agent.name,
-      emoji: agent.identity.emoji ?? "",
-      theme: agent.identity.theme ?? "",
-      avatar: agent.identity.avatar ?? ""
+      ...buildAgentDraft(agent.workspaceId, {
+        id: agent.id,
+        modelId: agent.modelId === "unassigned" ? "" : agent.modelId,
+        name: agent.name,
+        emoji: agent.identity.emoji ?? "",
+        theme: agent.identity.theme ?? "",
+        avatar: agent.identity.avatar ?? "",
+        policy: agent.policy
+      })
     });
+    setIsEditAgentAdvancedOpen(false);
     setIsEditAgentOpen(true);
   };
 
@@ -639,15 +648,35 @@ export function MissionSidebar({
                               Add
                             </Button>
                           </DialogTrigger>
-                          <DialogContent>
+                          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
                             <DialogHeader>
                               <DialogTitle>Create a new OpenClaw agent</DialogTitle>
                               <DialogDescription>
-                                This creates a real isolated agent bound to an existing workspace.
+                                This creates a real isolated agent bound to an existing workspace with a preset policy.
                               </DialogDescription>
                             </DialogHeader>
 
-                            <div className="space-y-4">
+                            <div className="space-y-5">
+                              <div className="space-y-3">
+                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Agent preset</p>
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  {AGENT_PRESET_OPTIONS.map((option) => (
+                                    <AgentPresetCard
+                                      key={option.value}
+                                      label={option.label}
+                                      description={option.description}
+                                      active={createDraft.policy.preset === option.value}
+                                      badgeVariant={getAgentPresetMeta(option.value).badgeVariant}
+                                      onClick={() =>
+                                        setCreateDraft((current) => applyAgentPreset(current, option.value))
+                                      }
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+
+                              <AgentPolicySummary policy={createDraft.policy} />
+
                               <FormField label="Agent id" htmlFor="agent-id">
                                 <Input
                                   id="agent-id"
@@ -672,7 +701,7 @@ export function MissionSidebar({
                                       name: event.target.value
                                     }))
                                   }
-                                  placeholder="Marketing"
+                                  placeholder={getAgentPresetMeta(createDraft.policy.preset).defaultName}
                                 />
                               </FormField>
 
@@ -728,7 +757,7 @@ export function MissionSidebar({
                                         emoji: event.target.value
                                       }))
                                     }
-                                    placeholder="🤖"
+                                    placeholder={getAgentPresetMeta(createDraft.policy.preset).defaultEmoji}
                                   />
                                 </FormField>
                                 <FormField label="Theme" htmlFor="agent-theme">
@@ -741,7 +770,7 @@ export function MissionSidebar({
                                         theme: event.target.value
                                       }))
                                     }
-                                    placeholder="protocol droid"
+                                    placeholder={getAgentPresetMeta(createDraft.policy.preset).defaultTheme}
                                   />
                                 </FormField>
                               </div>
@@ -759,6 +788,91 @@ export function MissionSidebar({
                                   placeholder="https://example.com/avatar.png"
                                 />
                               </FormField>
+
+                              <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-medium text-white">Advanced policy</p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                                      Override missing-tool behavior, install scope, file access, and network posture.
+                                    </p>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="h-8 rounded-full px-3 text-[11px]"
+                                    onClick={() => setIsCreateAgentAdvancedOpen((current) => !current)}
+                                  >
+                                    {isCreateAgentAdvancedOpen ? "Hide" : "Show"}
+                                  </Button>
+                                </div>
+
+                                {isCreateAgentAdvancedOpen ? (
+                                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                                    <AgentPolicySelect
+                                      label="Missing tool behavior"
+                                      htmlFor="create-agent-missing-tools"
+                                      value={createDraft.policy.missingToolBehavior}
+                                      options={AGENT_MISSING_TOOL_BEHAVIOR_OPTIONS}
+                                      onChange={(value) =>
+                                        setCreateDraft((current) => ({
+                                          ...current,
+                                          policy: {
+                                            ...current.policy,
+                                            missingToolBehavior: value
+                                          }
+                                        }))
+                                      }
+                                    />
+                                    <AgentPolicySelect
+                                      label="Install scope"
+                                      htmlFor="create-agent-install-scope"
+                                      value={createDraft.policy.installScope}
+                                      options={AGENT_INSTALL_SCOPE_OPTIONS}
+                                      onChange={(value) =>
+                                        setCreateDraft((current) => ({
+                                          ...current,
+                                          policy: {
+                                            ...current.policy,
+                                            installScope: value
+                                          }
+                                        }))
+                                      }
+                                    />
+                                    <AgentPolicySelect
+                                      label="File access"
+                                      htmlFor="create-agent-file-access"
+                                      value={createDraft.policy.fileAccess}
+                                      options={AGENT_FILE_ACCESS_OPTIONS}
+                                      onChange={(value) =>
+                                        setCreateDraft((current) => ({
+                                          ...current,
+                                          policy: {
+                                            ...current.policy,
+                                            fileAccess: value
+                                          }
+                                        }))
+                                      }
+                                    />
+                                    <AgentPolicySelect
+                                      label="Network access"
+                                      htmlFor="create-agent-network-access"
+                                      value={createDraft.policy.networkAccess}
+                                      options={AGENT_NETWORK_ACCESS_OPTIONS}
+                                      onChange={(value) =>
+                                        setCreateDraft((current) => ({
+                                          ...current,
+                                          policy: {
+                                            ...current.policy,
+                                            networkAccess: value
+                                          }
+                                        }))
+                                      }
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
 
                             <DialogFooter>
@@ -799,9 +913,14 @@ export function MissionSidebar({
                                 {agent.id}
                               </p>
                             </div>
-                            <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
-                              {agent.status}
-                            </Badge>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Badge variant={getAgentPresetMeta(agent.policy.preset).badgeVariant}>
+                                {formatAgentPresetLabel(agent.policy.preset)}
+                              </Badge>
+                              <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
+                                {agent.status}
+                              </Badge>
+                            </div>
                           </div>
 
                           <div className="mt-3 flex items-center gap-2">
@@ -1045,16 +1164,36 @@ export function MissionSidebar({
       </Dialog>
 
       <Dialog open={isEditAgentOpen} onOpenChange={setIsEditAgentOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Edit OpenClaw agent</DialogTitle>
             <DialogDescription>
-              Update the selected agent identity and routing model.
+              Update the selected agent identity, preset, and operating policy.
             </DialogDescription>
           </DialogHeader>
 
           {editDraft ? (
-            <div className="space-y-4">
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Agent preset</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {AGENT_PRESET_OPTIONS.map((option) => (
+                    <AgentPresetCard
+                      key={option.value}
+                      label={option.label}
+                      description={option.description}
+                      active={editDraft.policy.preset === option.value}
+                      badgeVariant={getAgentPresetMeta(option.value).badgeVariant}
+                      onClick={() =>
+                        setEditDraft((current) => (current ? applyAgentPreset(current, option.value) : current))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <AgentPolicySummary policy={editDraft.policy} />
+
               <FormField label="Agent id" htmlFor="edit-agent-id">
                 <Input id="edit-agent-id" value={editDraft.id} disabled />
               </FormField>
@@ -1073,7 +1212,7 @@ export function MissionSidebar({
                         : current
                     )
                   }
-                  placeholder="Agent display name"
+                  placeholder={getAgentPresetMeta(editDraft.policy.preset).defaultName}
                 />
               </FormField>
 
@@ -1128,7 +1267,7 @@ export function MissionSidebar({
                           : current
                       )
                     }
-                    placeholder="🤖"
+                    placeholder={getAgentPresetMeta(editDraft.policy.preset).defaultEmoji}
                   />
                 </FormField>
                 <FormField label="Theme" htmlFor="edit-agent-theme">
@@ -1145,7 +1284,7 @@ export function MissionSidebar({
                           : current
                       )
                     }
-                    placeholder="theme"
+                    placeholder={getAgentPresetMeta(editDraft.policy.preset).defaultTheme}
                   />
                 </FormField>
               </div>
@@ -1167,6 +1306,107 @@ export function MissionSidebar({
                   placeholder="https://example.com/avatar.png"
                 />
               </FormField>
+
+              <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">Advanced policy</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Override how this agent handles missing tools, installs, file scope, and network usage.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-[11px]"
+                    onClick={() => setIsEditAgentAdvancedOpen((current) => !current)}
+                  >
+                    {isEditAgentAdvancedOpen ? "Hide" : "Show"}
+                  </Button>
+                </div>
+
+                {isEditAgentAdvancedOpen ? (
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <AgentPolicySelect
+                      label="Missing tool behavior"
+                      htmlFor="edit-agent-missing-tools"
+                      value={editDraft.policy.missingToolBehavior}
+                      options={AGENT_MISSING_TOOL_BEHAVIOR_OPTIONS}
+                      onChange={(value) =>
+                        setEditDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                policy: {
+                                  ...current.policy,
+                                  missingToolBehavior: value
+                                }
+                              }
+                            : current
+                        )
+                      }
+                    />
+                    <AgentPolicySelect
+                      label="Install scope"
+                      htmlFor="edit-agent-install-scope"
+                      value={editDraft.policy.installScope}
+                      options={AGENT_INSTALL_SCOPE_OPTIONS}
+                      onChange={(value) =>
+                        setEditDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                policy: {
+                                  ...current.policy,
+                                  installScope: value
+                                }
+                              }
+                            : current
+                        )
+                      }
+                    />
+                    <AgentPolicySelect
+                      label="File access"
+                      htmlFor="edit-agent-file-access"
+                      value={editDraft.policy.fileAccess}
+                      options={AGENT_FILE_ACCESS_OPTIONS}
+                      onChange={(value) =>
+                        setEditDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                policy: {
+                                  ...current.policy,
+                                  fileAccess: value
+                                }
+                              }
+                            : current
+                        )
+                      }
+                    />
+                    <AgentPolicySelect
+                      label="Network access"
+                      htmlFor="edit-agent-network-access"
+                      value={editDraft.policy.networkAccess}
+                      options={AGENT_NETWORK_ACCESS_OPTIONS}
+                      onChange={(value) =>
+                        setEditDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                policy: {
+                                  ...current.policy,
+                                  networkAccess: value
+                                }
+                              }
+                            : current
+                        )
+                      }
+                    />
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -1304,6 +1544,122 @@ function FormField({
       {children}
     </div>
   );
+}
+
+function AgentPresetCard({
+  label,
+  description,
+  active,
+  badgeVariant,
+  onClick
+}: {
+  label: string;
+  description: string;
+  active: boolean;
+  badgeVariant: "default" | "muted" | "success" | "warning";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-[20px] border p-4 text-left transition-colors",
+        active ? "border-cyan-300/30 bg-cyan-400/10" : "border-white/10 bg-white/[0.03]"
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-white">{label}</p>
+          <p className="text-xs leading-5 text-slate-400">{description}</p>
+        </div>
+        <Badge variant={badgeVariant}>{active ? "selected" : "preset"}</Badge>
+      </div>
+    </button>
+  );
+}
+
+function AgentPolicySummary({ policy }: { policy: AgentPolicy }) {
+  const presetMeta = getAgentPresetMeta(policy.preset);
+
+  return (
+    <div className="rounded-[20px] border border-white/10 bg-slate-950/50 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-white">{presetMeta.label}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">{presetMeta.description}</p>
+        </div>
+        <Badge variant={presetMeta.badgeVariant}>{presetMeta.label}</Badge>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Badge variant="muted">{formatAgentMissingToolBehaviorLabel(policy.missingToolBehavior)}</Badge>
+        <Badge variant="muted">{formatAgentInstallScopeLabel(policy.installScope)}</Badge>
+        <Badge variant="muted">{formatAgentFileAccessLabel(policy.fileAccess)}</Badge>
+        <Badge variant="muted">Network {formatAgentNetworkAccessLabel(policy.networkAccess)}</Badge>
+      </div>
+    </div>
+  );
+}
+
+function AgentPolicySelect<T extends string>({
+  label,
+  htmlFor,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  htmlFor: string;
+  value: T;
+  options: Array<{ value: T; label: string; description: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <FormField label={label} htmlFor={htmlFor}>
+      <select
+        id={htmlFor}
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label} - {option.description}
+          </option>
+        ))}
+      </select>
+    </FormField>
+  );
+}
+
+function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): AgentDraft {
+  const policy = resolveAgentPolicy(seed.policy?.preset ?? "worker", seed.policy);
+  const presetMeta = getAgentPresetMeta(policy.preset);
+
+  return {
+    id: seed.id ?? "",
+    workspaceId,
+    modelId: seed.modelId ?? "",
+    name: seed.name ?? presetMeta.defaultName,
+    emoji: seed.emoji ?? presetMeta.defaultEmoji,
+    theme: seed.theme ?? presetMeta.defaultTheme,
+    avatar: seed.avatar ?? "",
+    policy
+  };
+}
+
+function applyAgentPreset(draft: AgentDraft, preset: AgentPreset): AgentDraft {
+  const previousMeta = getAgentPresetMeta(draft.policy.preset);
+  const nextMeta = getAgentPresetMeta(preset);
+  const nextPolicy = resolveAgentPolicy(preset);
+
+  return {
+    ...draft,
+    name: !draft.name || draft.name === previousMeta.defaultName ? nextMeta.defaultName : draft.name,
+    emoji: !draft.emoji || draft.emoji === previousMeta.defaultEmoji ? nextMeta.defaultEmoji : draft.emoji,
+    theme: !draft.theme || draft.theme === previousMeta.defaultTheme ? nextMeta.defaultTheme : draft.theme,
+    policy: nextPolicy
+  };
 }
 
 function sidebarPathLabel(value: string) {

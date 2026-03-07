@@ -4,6 +4,24 @@ export type AgentStatus = "engaged" | "monitoring" | "ready" | "standby" | "offl
 
 export type RuntimeStatus = "active" | "queued" | "idle" | "completed" | "error";
 
+export type AgentPreset = "worker" | "setup" | "browser" | "custom";
+
+export type AgentMissingToolBehavior = "fallback" | "ask-setup" | "route-setup" | "allow-install";
+
+export type AgentInstallScope = "none" | "workspace" | "system";
+
+export type AgentFileAccess = "workspace-only" | "extended";
+
+export type AgentNetworkAccess = "restricted" | "enabled";
+
+export interface AgentPolicy {
+  preset: AgentPreset;
+  missingToolBehavior: AgentMissingToolBehavior;
+  installScope: AgentInstallScope;
+  fileAccess: AgentFileAccess;
+  networkAccess: AgentNetworkAccess;
+}
+
 export interface GatewayDiagnostics {
   installed: boolean;
   loaded: boolean;
@@ -103,6 +121,7 @@ export interface OpenClawAgent {
   };
   skills: string[];
   tools: string[];
+  policy: AgentPolicy;
 }
 
 export interface ModelRecord {
@@ -238,6 +257,7 @@ export interface WorkspaceAgentBlueprintInput {
   skillId?: string;
   modelId?: string;
   isPrimary?: boolean;
+  policy?: AgentPolicy;
 }
 
 export interface WorkspaceCreateInput {
@@ -283,6 +303,7 @@ export interface AgentCreateInput {
   emoji?: string;
   theme?: string;
   avatar?: string;
+  policy?: AgentPolicy;
 }
 
 export interface AgentUpdateInput {
@@ -293,4 +314,5 @@ export interface AgentUpdateInput {
   emoji?: string;
   theme?: string;
   avatar?: string;
+  policy?: AgentPolicy;
 }

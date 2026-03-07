@@ -1,3 +1,4 @@
+import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
 export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
@@ -96,7 +97,8 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
           sourceFiles: []
         },
         skills: ["planning"],
-        tools: ["fs.workspaceOnly"]
+        tools: ["fs.workspaceOnly"],
+        policy: resolveAgentPolicy("worker")
       },
       {
         id: "agent-demo-executor",
@@ -130,7 +132,8 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
           sourceFiles: []
         },
         skills: ["execution"],
-        tools: ["fs.workspaceOnly"]
+        tools: ["fs.workspaceOnly"],
+        policy: resolveAgentPolicy("worker")
       }
     ],
     models: [

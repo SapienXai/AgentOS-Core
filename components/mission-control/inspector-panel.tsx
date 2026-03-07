@@ -19,6 +19,14 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import {
+  formatAgentFileAccessLabel,
+  formatAgentInstallScopeLabel,
+  formatAgentMissingToolBehaviorLabel,
+  formatAgentNetworkAccessLabel,
+  formatAgentPresetLabel,
+  getAgentPresetMeta
+} from "@/lib/openclaw/agent-presets";
+import {
   compactPath,
   formatContextWindow,
   formatRelativeTime,
@@ -593,6 +601,9 @@ function AgentContent({
         <p>{agent.identity.emoji ? `${agent.identity.emoji} · ${agent.identity.theme ?? "theme unset"}` : "No identity emoji"}</p>
         <div className="flex flex-wrap gap-2">
           {agent.isDefault ? <Badge variant="default">default agent</Badge> : null}
+          <Badge variant={getAgentPresetMeta(agent.policy.preset).badgeVariant}>
+            {formatAgentPresetLabel(agent.policy.preset)}
+          </Badge>
           {agent.identity.source ? <Badge variant="muted">{agent.identity.source}</Badge> : null}
         </div>
       </InfoCard>
@@ -664,6 +675,24 @@ function AgentContent({
           {typeof agent.heartbeat.everyMs === "number" ? (
             <Badge variant="muted">{Math.round(agent.heartbeat.everyMs / 1000)}s interval</Badge>
           ) : null}
+        </div>
+      </InfoCard>
+
+      <InfoCard icon={TerminalSquare} title="Operating policy" value={formatAgentPresetLabel(agent.policy.preset)}>
+        <p>{getAgentPresetMeta(agent.policy.preset).description}</p>
+        <div className="mt-3 grid gap-2 text-[13px] text-slate-300">
+          <p>
+            Missing tools: <span className="text-white">{formatAgentMissingToolBehaviorLabel(agent.policy.missingToolBehavior)}</span>
+          </p>
+          <p>
+            Install scope: <span className="text-white">{formatAgentInstallScopeLabel(agent.policy.installScope)}</span>
+          </p>
+          <p>
+            File access: <span className="text-white">{formatAgentFileAccessLabel(agent.policy.fileAccess)}</span>
+          </p>
+          <p>
+            Network: <span className="text-white">{formatAgentNetworkAccessLabel(agent.policy.networkAccess)}</span>
+          </p>
         </div>
       </InfoCard>
 

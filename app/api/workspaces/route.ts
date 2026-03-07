@@ -11,6 +11,14 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const agentPolicySchema = z.object({
+  preset: z.enum(["worker", "setup", "browser", "custom"]),
+  missingToolBehavior: z.enum(["fallback", "ask-setup", "route-setup", "allow-install"]),
+  installScope: z.enum(["none", "workspace", "system"]),
+  fileAccess: z.enum(["workspace-only", "extended"]),
+  networkAccess: z.enum(["restricted", "enabled"])
+});
+
 const workspaceSchema = z.object({
   name: z.string().min(1),
   brief: z.string().optional(),
@@ -41,7 +49,8 @@ const workspaceSchema = z.object({
         theme: z.string().optional(),
         skillId: z.string().optional(),
         modelId: z.string().optional(),
-        isPrimary: z.boolean().optional()
+        isPrimary: z.boolean().optional(),
+        policy: agentPolicySchema.optional()
       })
     )
     .optional()
