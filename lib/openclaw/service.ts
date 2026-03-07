@@ -1,12 +1,19 @@
 import "server-only";
 
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { createFallbackSnapshot } from "@/lib/openclaw/fallback";
 import { detectOpenClaw, runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import {
+  DEFAULT_WORKSPACE_RULES,
+  buildDefaultWorkspaceAgents,
+  getWorkspaceTemplateMeta
+} from "@/lib/openclaw/workspace-presets";
 import type {
   AgentCreateInput,
   AgentStatus,
@@ -21,11 +28,19 @@ import type {
   RuntimeRecord,
   RuntimeOutputItem,
   RuntimeOutputRecord,
+  WorkspaceAgentBlueprintInput,
+  WorkspaceCreateResult,
+  WorkspaceCreateRules,
   WorkspaceDeleteInput,
   WorkspaceCreateInput,
+  WorkspaceModelProfile,
+  WorkspaceSourceMode,
+  WorkspaceTemplate,
   WorkspaceUpdateInput,
   WorkspaceProject
 } from "@/lib/openclaw/types";
+
+const execFileAsync = promisify(execFile);
 
 type GatewayStatusPayload = {
   service?: {
@@ -657,6 +672,8 @@ export async function createAgent(input: AgentCreateInput) {
     agentId,
     "--workspace",
     workspace.path,
+    "--agent-dir",
+    buildWorkspaceAgentStatePath(workspace.path, agentId),
     "--non-interactive",
     "--json"
   ];
@@ -729,39 +746,85 @@ export async function updateAgent(input: AgentUpdateInput) {
   };
 }
 
-export async function createWorkspaceProject(input: WorkspaceCreateInput) {
-  const name = input.name.trim();
+export async function createWorkspaceProject(input: WorkspaceCreateInput): Promise<WorkspaceCreateResult> {
+  const normalized = resolveWorkspaceBootstrapInput(input);
+  const targetDir = resolveWorkspaceCreationTargetDir(normalized);
 
-  if (!name) {
-    throw new Error("Workspace name is required.");
-  }
-
-  const slug = slugify(name);
-  const targetDir = input.directory?.trim() || path.join(resolveWorkspaceRoot(), slug);
-  const agentId = `${slug}-default`;
-
-  await mkdir(targetDir, { recursive: true });
-
-  const args = [
-    "agents",
-    "add",
-    agentId,
-    "--workspace",
+  await materializeWorkspaceSource({
     targetDir,
-    "--non-interactive",
-    "--json"
-  ];
+    sourceMode: normalized.sourceMode,
+    repoUrl: normalized.repoUrl,
+    existingPath: normalized.existingPath
+  });
 
-  if (input.modelId?.trim()) {
-    args.push("--model", input.modelId.trim());
+  const enabledAgents = normalized.agents.filter((agent) => agent.enabled);
+
+  if (enabledAgents.length === 0) {
+    throw new Error("Enable at least one agent for the workspace.");
   }
 
-  await runOpenClaw(args);
+  await scaffoldWorkspaceContents(targetDir, {
+    name: normalized.name,
+    brief: normalized.brief,
+    template: normalized.template,
+    teamPreset: normalized.teamPreset,
+    modelProfile: normalized.modelProfile,
+    rules: normalized.rules,
+    sourceMode: normalized.sourceMode,
+    agents: enabledAgents
+  });
+
+  const createdAgentIds: string[] = [];
+
+  for (const agent of enabledAgents) {
+    const createdAgentId = await createBootstrappedWorkspaceAgent({
+      workspacePath: targetDir,
+      workspaceSlug: normalized.slug,
+      workspaceModelId: normalized.modelId,
+      workspaceOnly: normalized.rules.workspaceOnly,
+      agent
+    });
+    createdAgentIds.push(createdAgentId);
+  }
+
+  const primaryAgentId =
+    createdAgentIds.find((agentId) =>
+      enabledAgents.some(
+        (agent) => agent.isPrimary && createWorkspaceAgentId(normalized.slug, agent.id) === agentId
+      )
+    ) ?? createdAgentIds[0];
+
+  let kickoffRunId: string | undefined;
+  let kickoffStatus: string | undefined;
+  let kickoffError: string | undefined;
+
+  if (normalized.rules.kickoffMission) {
+    try {
+      const kickoffResult = await runWorkspaceKickoffMission({
+        agentId: primaryAgentId,
+        brief: normalized.brief,
+        modelProfile: normalized.modelProfile,
+        template: normalized.template
+      });
+      kickoffRunId = kickoffResult.runId;
+      kickoffStatus = kickoffResult.status;
+    } catch (error) {
+      kickoffError =
+        error instanceof Error ? error.message : "Kickoff mission could not be started.";
+    }
+  }
+
   snapshotCache = null;
+  runtimeHistoryCache = new Map();
 
   return {
+    workspaceId: workspaceIdFromPath(targetDir),
     workspacePath: targetDir,
-    agentId
+    agentIds: createdAgentIds,
+    primaryAgentId,
+    kickoffRunId,
+    kickoffStatus,
+    kickoffError
   };
 }
 
@@ -797,7 +860,11 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
       entry.workspace === workspace.path
         ? {
             ...entry,
-            workspace: targetPath
+            workspace: targetPath,
+            agentDir:
+              typeof entry.agentDir === "string" && entry.agentDir.startsWith(`${workspace.path}${path.sep}`)
+                ? path.join(targetPath, path.relative(workspace.path, entry.agentDir))
+                : entry.agentDir
           }
         : entry
     );
@@ -862,12 +929,895 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
   };
 }
 
+type ResolvedWorkspaceBootstrapInput = {
+  name: string;
+  slug: string;
+  brief?: string;
+  directory?: string;
+  modelId?: string;
+  repoUrl?: string;
+  existingPath?: string;
+  sourceMode: WorkspaceSourceMode;
+  template: WorkspaceTemplate;
+  teamPreset: NonNullable<WorkspaceCreateInput["teamPreset"]>;
+  modelProfile: WorkspaceModelProfile;
+  rules: WorkspaceCreateRules;
+  agents: WorkspaceAgentBlueprintInput[];
+};
+
+async function materializeWorkspaceSource(params: {
+  targetDir: string;
+  sourceMode: WorkspaceSourceMode;
+  repoUrl?: string;
+  existingPath?: string;
+}) {
+  if (params.sourceMode === "existing") {
+    await ensureExistingDirectory(params.targetDir);
+    return;
+  }
+
+  if (params.sourceMode === "clone") {
+    const repoUrl = normalizeOptionalValue(params.repoUrl);
+
+    if (!repoUrl) {
+      throw new Error("Repository URL is required when cloning a repo.");
+    }
+
+    await ensurePathAvailable(params.targetDir, "");
+    await mkdir(path.dirname(params.targetDir), { recursive: true });
+    await runSystemCommand("git", ["clone", repoUrl, params.targetDir]);
+    return;
+  }
+
+  await ensureFreshWorkspaceDirectory(params.targetDir);
+}
+
+async function scaffoldWorkspaceContents(
+  workspacePath: string,
+  options: {
+    name: string;
+    brief?: string;
+    template: WorkspaceTemplate;
+    teamPreset: NonNullable<WorkspaceCreateInput["teamPreset"]>;
+    modelProfile: WorkspaceModelProfile;
+    rules: WorkspaceCreateRules;
+    sourceMode: WorkspaceSourceMode;
+    agents: WorkspaceAgentBlueprintInput[];
+  }
+) {
+  const templateMeta = getWorkspaceTemplateMeta(options.template);
+  const createdAt = new Date().toISOString();
+  const toolExamples = await detectWorkspaceToolExamples(workspacePath);
+
+  await mkdir(path.join(workspacePath, "skills"), { recursive: true });
+  await mkdir(path.join(workspacePath, ".openclaw", "project-shell", "runs"), { recursive: true });
+  await mkdir(path.join(workspacePath, ".openclaw", "project-shell", "tasks"), { recursive: true });
+
+  await writeTextFileIfMissing(path.join(workspacePath, ".openclaw", "project-shell", "events.jsonl"), "");
+  await writeTextFileIfMissing(
+    path.join(workspacePath, ".openclaw", "project.json"),
+    `${JSON.stringify(
+      {
+        version: 1,
+        slug: slugify(options.name),
+        name: options.name,
+        icon: templateMeta.icon,
+        createdAt,
+        updatedAt: createdAt,
+        agentTemplate: options.teamPreset === "solo" ? "solo" : "core-team"
+      },
+      null,
+      2
+    )}\n`
+  );
+
+  await writeTextFileIfMissing(
+    path.join(workspacePath, "AGENTS.md"),
+    renderAgentsMarkdown({
+      name: options.name,
+      brief: options.brief,
+      template: options.template,
+      sourceMode: options.sourceMode,
+      agents: options.agents,
+      rules: options.rules
+    })
+  );
+  await writeTextFileIfMissing(
+    path.join(workspacePath, "SOUL.md"),
+    renderSoulMarkdown(options.template, options.brief)
+  );
+  await writeTextFileIfMissing(
+    path.join(workspacePath, "IDENTITY.md"),
+    renderIdentityMarkdown(options.template)
+  );
+  await writeTextFileIfMissing(
+    path.join(workspacePath, "TOOLS.md"),
+    renderToolsMarkdown(options.template, toolExamples)
+  );
+  await writeTextFileIfMissing(
+    path.join(workspacePath, "HEARTBEAT.md"),
+    renderHeartbeatMarkdown(options.template)
+  );
+
+  if (options.rules.generateMemory) {
+    await mkdir(path.join(workspacePath, "memory"), { recursive: true });
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "MEMORY.md"),
+      renderMemoryMarkdown(options.name, options.template, options.brief)
+    );
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "memory", "blueprint.md"),
+      renderBlueprintMarkdown(options.name, options.template, options.brief)
+    );
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "memory", "decisions.md"),
+      renderDecisionsMarkdown()
+    );
+  }
+
+  if (options.rules.generateStarterDocs) {
+    await mkdir(path.join(workspacePath, "docs"), { recursive: true });
+    await mkdir(path.join(workspacePath, "deliverables"), { recursive: true });
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "docs", "brief.md"),
+      renderBriefMarkdown(options.name, options.template, options.brief, options.sourceMode)
+    );
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "docs", "architecture.md"),
+      renderArchitectureMarkdown(options.template)
+    );
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "deliverables", "README.md"),
+      renderDeliverablesMarkdown()
+    );
+
+    if (options.template === "frontend") {
+      await writeTextFileIfMissing(
+        path.join(workspacePath, "docs", "ux-notes.md"),
+        renderTemplateSpecificDoc("ux")
+      );
+    }
+
+    if (options.template === "backend") {
+      await writeTextFileIfMissing(
+        path.join(workspacePath, "docs", "service-map.md"),
+        renderTemplateSpecificDoc("backend")
+      );
+    }
+
+    if (options.template === "research") {
+      await writeTextFileIfMissing(
+        path.join(workspacePath, "docs", "research-plan.md"),
+        renderTemplateSpecificDoc("research")
+      );
+    }
+
+    if (options.template === "content") {
+      await writeTextFileIfMissing(
+        path.join(workspacePath, "docs", "content-brief.md"),
+        renderTemplateSpecificDoc("content")
+      );
+    }
+  }
+
+  for (const agent of options.agents) {
+    const skillId = normalizeOptionalValue(agent.skillId);
+
+    if (!skillId) {
+      continue;
+    }
+
+    await mkdir(path.join(workspacePath, "skills", skillId), { recursive: true });
+    await writeTextFileIfMissing(
+      path.join(workspacePath, "skills", skillId, "SKILL.md"),
+      renderSkillMarkdown(skillId, agent.role)
+    );
+  }
+}
+
+async function createBootstrappedWorkspaceAgent(params: {
+  workspacePath: string;
+  workspaceSlug: string;
+  workspaceModelId?: string;
+  workspaceOnly: boolean;
+  agent: WorkspaceAgentBlueprintInput;
+}) {
+  const agentId = createWorkspaceAgentId(params.workspaceSlug, params.agent.id);
+  const modelId =
+    normalizeOptionalValue(params.agent.modelId) ?? normalizeOptionalValue(params.workspaceModelId);
+  const args = [
+    "agents",
+    "add",
+    agentId,
+    "--workspace",
+    params.workspacePath,
+    "--agent-dir",
+    buildWorkspaceAgentStatePath(params.workspacePath, agentId),
+    "--non-interactive",
+    "--json"
+  ];
+
+  if (modelId) {
+    args.push("--model", modelId);
+  }
+
+  await runOpenClaw(args);
+
+  const configEntry = await upsertAgentConfigEntry(agentId, params.workspacePath, {
+    name: normalizeOptionalValue(params.agent.name),
+    model: modelId,
+    skills: params.agent.skillId ? [params.agent.skillId] : [],
+    tools: params.workspaceOnly
+      ? {
+          fs: {
+            workspaceOnly: true
+          }
+        }
+      : null
+  });
+
+  await applyAgentIdentity(agentId, params.workspacePath, {
+    name: normalizeOptionalValue(params.agent.name) ?? configEntry.name,
+    emoji: normalizeOptionalValue(params.agent.emoji),
+    theme: normalizeOptionalValue(params.agent.theme)
+  });
+
+  return agentId;
+}
+
+async function runWorkspaceKickoffMission(params: {
+  agentId: string;
+  brief?: string;
+  modelProfile: WorkspaceModelProfile;
+  template: WorkspaceTemplate;
+}) {
+  const prompt = buildWorkspaceKickoffPrompt(params.template, params.brief);
+  const thinking =
+    params.modelProfile === "fast"
+      ? "low"
+      : params.modelProfile === "quality"
+        ? "high"
+        : "medium";
+
+  return runOpenClawJson<MissionCommandPayload>(
+    [
+      "agent",
+      "--agent",
+      params.agentId,
+      "--message",
+      prompt,
+      "--thinking",
+      thinking,
+      "--timeout",
+      "90",
+      "--json"
+    ],
+    { timeoutMs: 120000 }
+  );
+}
+
+function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWorkspaceBootstrapInput {
+  const name = input.name.trim();
+
+  if (!name) {
+    throw new Error("Workspace name is required.");
+  }
+
+  const slug = slugify(name);
+
+  if (!slug) {
+    throw new Error("Workspace name must include letters or numbers.");
+  }
+
+  const template = input.template ?? "software";
+  const teamPreset = input.teamPreset ?? "core";
+  const sourceMode = input.sourceMode ?? "empty";
+  const modelProfile = input.modelProfile ?? "balanced";
+  const rules: WorkspaceCreateRules = {
+    ...DEFAULT_WORKSPACE_RULES,
+    ...(input.rules ?? {})
+  };
+  const normalizedAgents = (input.agents?.length
+    ? input.agents
+    : buildDefaultWorkspaceAgents(template, teamPreset)
+  ).map((agent) => ({
+    id: slugify(agent.id) || "agent",
+    role: agent.role.trim() || prettifyAgentName(agent.id),
+    name: normalizeOptionalValue(agent.name) ?? prettifyAgentName(agent.id),
+    enabled: agent.enabled !== false,
+    emoji: normalizeOptionalValue(agent.emoji),
+    theme: normalizeOptionalValue(agent.theme),
+    skillId: normalizeOptionalValue(agent.skillId),
+    modelId: normalizeOptionalValue(agent.modelId),
+    isPrimary: Boolean(agent.isPrimary)
+  }));
+
+  if (!normalizedAgents.some((agent) => agent.enabled && agent.isPrimary)) {
+    const firstEnabledAgent = normalizedAgents.find((agent) => agent.enabled);
+    if (firstEnabledAgent) {
+      firstEnabledAgent.isPrimary = true;
+    }
+  }
+
+  return {
+    name,
+    slug,
+    brief: normalizeOptionalValue(input.brief),
+    directory: normalizeOptionalValue(input.directory),
+    modelId: normalizeOptionalValue(input.modelId),
+    repoUrl: normalizeOptionalValue(input.repoUrl),
+    existingPath: normalizeOptionalValue(input.existingPath),
+    sourceMode,
+    template,
+    teamPreset,
+    modelProfile,
+    rules,
+    agents: normalizedAgents
+  };
+}
+
+function resolveWorkspaceCreationTargetDir(input: ResolvedWorkspaceBootstrapInput) {
+  if (input.sourceMode === "existing") {
+    const existingPath = input.existingPath || input.directory;
+
+    if (!existingPath) {
+      throw new Error("Choose an existing folder for this workspace.");
+    }
+
+    return path.isAbsolute(existingPath) ? existingPath : path.resolve(existingPath);
+  }
+
+  if (input.directory) {
+    return path.isAbsolute(input.directory)
+      ? input.directory
+      : path.join(resolveWorkspaceRoot(), input.directory);
+  }
+
+  return path.join(resolveWorkspaceRoot(), input.slug);
+}
+
+async function ensureFreshWorkspaceDirectory(targetDir: string) {
+  try {
+    const targetStat = await stat(targetDir);
+
+    if (!targetStat.isDirectory()) {
+      throw new Error("Target workspace path exists and is not a directory.");
+    }
+
+    const entries = await readdir(targetDir);
+
+    if (entries.length > 0) {
+      throw new Error("Target workspace directory already contains files. Use Existing folder instead.");
+    }
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
+
+    if (code === "ENOENT") {
+      await mkdir(targetDir, { recursive: true });
+      return;
+    }
+
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error("Unable to prepare the workspace directory.");
+  }
+
+  await mkdir(targetDir, { recursive: true });
+}
+
+async function ensureExistingDirectory(targetDir: string) {
+  try {
+    const targetStat = await stat(targetDir);
+
+    if (!targetStat.isDirectory()) {
+      throw new Error("The selected existing path is not a directory.");
+    }
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
+
+    if (code === "ENOENT") {
+      throw new Error("The selected existing folder does not exist.");
+    }
+
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error("Unable to access the selected existing folder.");
+  }
+}
+
+async function runSystemCommand(
+  command: string,
+  args: string[],
+  options: {
+    cwd?: string;
+    timeoutMs?: number;
+  } = {}
+) {
+  try {
+    await execFileAsync(command, args, {
+      cwd: options.cwd ?? process.cwd(),
+      timeout: options.timeoutMs ?? 120000,
+      maxBuffer: 8 * 1024 * 1024
+    });
+  } catch (error) {
+    const message =
+      typeof error === "object" &&
+      error &&
+      "stderr" in error &&
+      typeof error.stderr === "string" &&
+      error.stderr.trim()
+        ? error.stderr.trim()
+        : error instanceof Error
+          ? error.message
+          : "Unknown system command failure.";
+
+    throw new Error(message);
+  }
+}
+
+async function writeTextFileIfMissing(filePath: string, contents: string) {
+  try {
+    await access(filePath);
+  } catch {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, contents, "utf8");
+  }
+}
+
+async function detectWorkspaceToolExamples(workspacePath: string) {
+  const examples: string[] = [];
+  const packageExamples = await detectPackageExamples(workspacePath);
+  const makeExamples = await detectMakeExamples(workspacePath);
+  const pythonExamples = await detectPythonExamples(workspacePath);
+
+  examples.push(...packageExamples, ...makeExamples, ...pythonExamples);
+
+  if (examples.length === 0) {
+    examples.push(
+      "Use repository-local scripts or documented commands for repeatable workflows.",
+      "Update this file when the project exposes a cleaner build, test, or release path."
+    );
+  }
+
+  return uniqueStrings(examples).slice(0, 6);
+}
+
+async function detectPackageExamples(workspacePath: string) {
+  const packageJsonPath = path.join(workspacePath, "package.json");
+
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      packageManager?: string;
+      scripts?: Record<string, string>;
+    };
+    const scripts = parsed.scripts ?? {};
+    const manager = await detectPackageManager(workspacePath, parsed.packageManager);
+    const examples = [`Use \`${manager} install\` before the first local run.`];
+
+    for (const scriptName of ["dev", "start", "test", "lint", "build"]) {
+      if (scripts[scriptName]) {
+        examples.push(`Use \`${formatPackageScript(manager, scriptName)}\` for the ${scriptName} workflow.`);
+      }
+    }
+
+    return examples;
+  } catch {
+    return [];
+  }
+}
+
+async function detectMakeExamples(workspacePath: string) {
+  const makefilePath = path.join(workspacePath, "Makefile");
+
+  try {
+    const raw = await readFile(makefilePath, "utf8");
+    const matches = raw.match(/^(dev|test|lint|build|run):/gm) ?? [];
+    return matches.map((entry) => `Use \`make ${entry.replace(/:$/, "")}\` if the Makefile is the primary entry point.`);
+  } catch {
+    return [];
+  }
+}
+
+async function detectPythonExamples(workspacePath: string) {
+  const examples: string[] = [];
+
+  if (await pathExists(path.join(workspacePath, "pyproject.toml"))) {
+    examples.push("Use `pytest` for Python verification if the project exposes a test suite.");
+  }
+
+  if (await pathExists(path.join(workspacePath, "requirements.txt"))) {
+    examples.push("Install Python dependencies in a virtualenv before running project commands.");
+  }
+
+  return examples;
+}
+
+async function detectPackageManager(workspacePath: string, declaredPackageManager?: string) {
+  const normalizedDeclared = normalizeOptionalValue(declaredPackageManager);
+
+  if (normalizedDeclared) {
+    return normalizedDeclared.split("@")[0];
+  }
+
+  if (await pathExists(path.join(workspacePath, "pnpm-lock.yaml"))) {
+    return "pnpm";
+  }
+
+  if (await pathExists(path.join(workspacePath, "yarn.lock"))) {
+    return "yarn";
+  }
+
+  return "npm";
+}
+
+async function pathExists(targetPath: string) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatPackageScript(packageManager: string, scriptName: string) {
+  return packageManager === "yarn" ? `yarn ${scriptName}` : `${packageManager} run ${scriptName}`;
+}
+
+function createWorkspaceAgentId(workspaceSlug: string, agentKey: string) {
+  return `${workspaceSlug}-${slugify(agentKey) || "agent"}`;
+}
+
+function buildWorkspaceAgentStatePath(workspacePath: string, agentId: string) {
+  return path.join(workspacePath, ".openclaw", "agents", agentId, "agent");
+}
+
+function renderAgentsMarkdown(params: {
+  name: string;
+  brief?: string;
+  template: WorkspaceTemplate;
+  sourceMode: WorkspaceSourceMode;
+  agents: WorkspaceAgentBlueprintInput[];
+  rules: WorkspaceCreateRules;
+}) {
+  const templateMeta = getWorkspaceTemplateMeta(params.template);
+  const teamLines = params.agents.map(
+    (agent) => `- ${agent.role}: ${agent.name}${agent.skillId ? ` · skill ${agent.skillId}` : ""}`
+  );
+
+  return `# ${params.name}
+
+Shared project context for all agents working in this workspace.
+
+## Workspace
+- Template: ${templateMeta.label}
+- Source mode: ${params.sourceMode}
+- Workspace-only access: ${params.rules.workspaceOnly ? "enabled" : "disabled"}
+
+## Team
+${teamLines.join("\n")}
+
+## Customize
+${params.brief || "Clarify the project goal, definition of done, constraints, and success signals before large changes."}
+
+## Safety defaults
+- Stay inside the attached workspace unless the task explicitly requires another location.
+- Prefer direct, reviewable changes over speculative rewrites.
+- Preserve user work and avoid destructive actions without clear approval.
+- Update durable docs when stable architecture, workflow, or product decisions change.
+
+## Daily memory
+- Capture durable facts in MEMORY.md and memory/*.md.
+- Record stable decisions in memory/decisions.md.
+- Keep temporary chatter out of durable memory and deliverables.
+
+## Output
+- Be concise in chat and write longer output to files when the artifact matters.
+`;
+}
+
+function renderSoulMarkdown(template: WorkspaceTemplate, brief?: string) {
+  const templateMeta = getWorkspaceTemplateMeta(template);
+
+  return `# SOUL
+
+## My Purpose
+Help this ${templateMeta.label.toLowerCase()} workspace turn intent into real outcomes with pragmatic execution, verification, and durable memory.
+
+## How I Operate
+- Start from the current workspace reality before proposing large moves.
+- Prefer concrete action, visible artifacts, and clear handoffs.
+- Keep docs, memory, and deliverables aligned with the actual state of the work.
+
+## My Quirks
+- Pragmatic
+- Direct
+- Product-aware
+- Quality-minded
+
+${brief ? `## Active Focus\n${brief}\n` : ""}`;
+}
+
+function renderIdentityMarkdown(template: WorkspaceTemplate) {
+  const templateMeta = getWorkspaceTemplateMeta(template);
+
+  return `# IDENTITY
+
+## Role
+This workspace hosts a ${templateMeta.label.toLowerCase()} team coordinated through OpenClaw.
+
+**Vibe:** pragmatic, concise, quality-minded, workspace-grounded
+`;
+}
+
+function renderToolsMarkdown(template: WorkspaceTemplate, toolExamples: string[]) {
+  const templateMeta = getWorkspaceTemplateMeta(template);
+
+  return `# TOOLS
+
+Repository commands and workflow notes for this ${templateMeta.label.toLowerCase()} workspace.
+
+## Examples
+${toolExamples.map((line) => `- ${line}`).join("\n")}
+
+## Notes
+- Replace these examples with sharper project-specific commands when the repo exposes them.
+- Prefer repeatable commands that other agents can run without interpretation drift.
+`;
+}
+
+function renderHeartbeatMarkdown(template: WorkspaceTemplate) {
+  const templateMeta = getWorkspaceTemplateMeta(template);
+
+  return `# HEARTBEAT
+
+- Start each substantial task by refreshing the brief, docs, and current files.
+- Keep the ${templateMeta.label.toLowerCase()} workspace coherent across code, docs, and memory.
+- Prefer explicit handoffs between implementation, review, testing, and knowledge capture.
+`;
+}
+
+function renderMemoryMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
+  return `# ${name} Memory
+
+Durable project facts for this ${getWorkspaceTemplateMeta(template).label.toLowerCase()} workspace.
+
+## Current brief
+${brief || "No brief captured yet. Fill this in as soon as the project goal is clarified."}
+
+## Stable facts
+- Add durable architecture, product, or workflow facts here.
+- Move longer notes into memory/*.md when they outgrow this file.
+`;
+}
+
+function renderBlueprintMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
+  return `# ${name} Blueprint
+
+## Workspace type
+${getWorkspaceTemplateMeta(template).label}
+
+## Outcome
+${brief || "Define the target outcome, user impact, and quality bar for this workspace."}
+
+## Constraints
+- Add technical, product, legal, or operational constraints here.
+
+## Unknowns
+- Capture unresolved questions that block confident execution.
+`;
+}
+
+function renderDecisionsMarkdown() {
+  return `# Decisions
+
+Use this file for durable decisions that should survive across sessions.
+
+## Template
+- Date:
+- Decision:
+- Context:
+- Consequence:
+`;
+}
+
+function renderBriefMarkdown(
+  name: string,
+  template: WorkspaceTemplate,
+  brief: string | undefined,
+  sourceMode: WorkspaceSourceMode
+) {
+  return `# ${name} Brief
+
+## Template
+${getWorkspaceTemplateMeta(template).label}
+
+## Source mode
+${sourceMode}
+
+## Objective
+${brief || "Clarify the main goal, target user, and success definition for this workspace."}
+
+## Success signals
+- Define what success looks like in observable terms.
+
+## Open questions
+- List the unknowns worth resolving first.
+`;
+}
+
+function renderArchitectureMarkdown(template: WorkspaceTemplate) {
+  return `# Architecture
+
+## Current shape
+- Describe the main components, systems, or content lanes in this ${getWorkspaceTemplateMeta(template).label.toLowerCase()} workspace.
+
+## Dependencies
+- List critical external services, repos, data sources, or channels.
+
+## Risks
+- Capture structural, operational, or delivery risks here.
+`;
+}
+
+function renderDeliverablesMarkdown() {
+  return `# Deliverables
+
+Use this folder for substantial output artifacts that should be easy to hand off or review.
+
+- Prefer one file per meaningful artifact.
+- Keep filenames descriptive and tied to the task or audience.
+`;
+}
+
+function renderTemplateSpecificDoc(kind: "ux" | "backend" | "research" | "content") {
+  if (kind === "ux") {
+    return `# UX Notes
+
+- Track interaction patterns, responsive edge cases, and visual risk areas here.
+`;
+  }
+
+  if (kind === "backend") {
+    return `# Service Map
+
+- Document services, jobs, queues, external dependencies, and critical flows here.
+`;
+  }
+
+  if (kind === "research") {
+    return `# Research Plan
+
+- State the question, method, evidence sources, and expected output before large investigation work.
+`;
+  }
+
+  return `# Content Brief
+
+- Capture audience, channel, tone, CTA, and distribution assumptions for this content workspace.
+`;
+}
+
+function renderSkillMarkdown(skillId: string, role: string) {
+  switch (skillId) {
+    case "project-builder":
+      return `# Project Builder
+
+Use this skill when implementing changes in the current project.
+
+- Prefer direct code or artifact changes over speculative planning.
+- Respect AGENTS.md, TOOLS.md, MEMORY.md, and memory/*.md before large edits.
+- Verify impact before finishing and leave the workspace in a clearer state.
+`;
+    case "project-reviewer":
+      return `# Project Reviewer
+
+Use this skill when reviewing changes in the current project.
+
+- Prioritize correctness, regressions, edge cases, and missing tests.
+- Prefer concrete findings with file and behavior references.
+- Keep summaries brief after findings.
+`;
+    case "project-tester":
+      return `# Project Tester
+
+Use this skill when validating behavior in the current project.
+
+- Prefer reproducible checks over assumptions.
+- Focus on failures, regressions, missing coverage, and environment constraints.
+- Report exactly what was verified and what could not be verified.
+`;
+    case "project-learner":
+      return `# Project Learner
+
+Use this skill when consolidating durable project knowledge.
+
+- Capture stable conventions, architecture decisions, and delivery notes.
+- Prefer updating MEMORY.md or memory/*.md with concise, durable facts.
+- Avoid ephemeral chatter and duplicated notes.
+`;
+    case "project-browser":
+      return `# Project Browser
+
+Use this skill when validating browser flows in the current workspace.
+
+- Exercise real user paths, not only component-level assumptions.
+- Capture screenshots, repro steps, and UI regressions with concrete evidence.
+- Hand off findings that need code changes back to the implementation agent.
+`;
+    case "project-researcher":
+      return `# Project Researcher
+
+Use this skill when investigating, synthesizing, or pressure-testing a problem space.
+
+- Start with explicit questions, evidence sources, and output goals.
+- Distinguish verified facts from inference.
+- Convert durable findings into MEMORY.md or memory/*.md.
+`;
+    case "project-strategist":
+      return `# Project Strategist
+
+Use this skill when shaping positioning, campaign direction, or editorial priorities.
+
+- Tie recommendations to audience, channel, and measurable goals.
+- Prefer explicit tradeoffs over vague guidance.
+- Leave a clear next-step plan other agents can execute.
+`;
+    case "project-writer":
+      return `# Project Writer
+
+Use this skill when drafting messaging, copy, or narrative assets.
+
+- Write for the target audience and channel rather than internal shorthand.
+- Keep tone and structure consistent with the workspace brief.
+- Flag assumptions that need strategic review before publication.
+`;
+    case "project-analyst":
+      return `# Project Analyst
+
+Use this skill when evaluating results, experiments, or performance signals.
+
+- Prefer measurable baselines and explicit comparisons.
+- Separate observed performance from speculation about causality.
+- Write down recommendations that can be actioned by the team.
+`;
+    default:
+      return `# ${role}
+
+Use this skill when operating in the current workspace.
+
+- Stay grounded in the shared workspace context.
+- Produce durable artifacts when the work needs to be handed off.
+- Keep outputs specific, reviewable, and easy for other agents to extend.
+`;
+  }
+}
+
+function buildWorkspaceKickoffPrompt(template: WorkspaceTemplate, brief?: string) {
+  const templateMeta = getWorkspaceTemplateMeta(template);
+
+  return [
+    `You are bootstrapping a newly created ${templateMeta.label.toLowerCase()} workspace.`,
+    brief ? `Project brief: ${brief}` : "No detailed project brief was provided yet.",
+    "Inspect the current files and improve the starter workspace without rewriting files that already had meaningful content.",
+    "If docs/architecture.md or memory/blueprint.md exist, refine them based on the real repository state.",
+    "Leave the workspace with a concise first task batch and any critical unknowns clearly called out.",
+    "Prefer concrete workspace-grounded edits over verbose chat output."
+  ].join("\n\n");
+}
+
 async function upsertAgentConfigEntry(
   agentId: string,
   workspacePath: string,
   updates: {
     name?: string;
     model?: string;
+    skills?: string[];
+    tools?: MutableAgentConfigEntry["tools"] | null;
   }
 ) {
   const configList = await readAgentConfigList();
@@ -890,6 +1840,18 @@ async function upsertAgentConfigEntry(
     nextEntry.model = updates.model;
   } else {
     delete nextEntry.model;
+  }
+
+  if (Array.isArray(updates.skills) && updates.skills.length > 0) {
+    nextEntry.skills = uniqueStrings(updates.skills);
+  } else if (Array.isArray(updates.skills)) {
+    delete nextEntry.skills;
+  }
+
+  if (updates.tools) {
+    nextEntry.tools = updates.tools;
+  } else if (updates.tools === null) {
+    delete nextEntry.tools;
   }
 
   if (existingIndex >= 0) {

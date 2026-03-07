@@ -182,10 +182,46 @@ export interface MissionResponse {
   meta?: Record<string, unknown>;
 }
 
+export type WorkspaceSourceMode = "empty" | "clone" | "existing";
+
+export type WorkspaceTemplate = "software" | "frontend" | "backend" | "research" | "content";
+
+export type WorkspaceTeamPreset = "solo" | "core" | "custom";
+
+export type WorkspaceModelProfile = "balanced" | "fast" | "quality";
+
+export interface WorkspaceCreateRules {
+  workspaceOnly: boolean;
+  generateStarterDocs: boolean;
+  generateMemory: boolean;
+  kickoffMission: boolean;
+}
+
+export interface WorkspaceAgentBlueprintInput {
+  id: string;
+  role: string;
+  name: string;
+  enabled: boolean;
+  emoji?: string;
+  theme?: string;
+  skillId?: string;
+  modelId?: string;
+  isPrimary?: boolean;
+}
+
 export interface WorkspaceCreateInput {
   name: string;
+  brief?: string;
   directory?: string;
   modelId?: string;
+  sourceMode?: WorkspaceSourceMode;
+  repoUrl?: string;
+  existingPath?: string;
+  template?: WorkspaceTemplate;
+  teamPreset?: WorkspaceTeamPreset;
+  modelProfile?: WorkspaceModelProfile;
+  rules?: Partial<WorkspaceCreateRules>;
+  agents?: WorkspaceAgentBlueprintInput[];
 }
 
 export interface WorkspaceUpdateInput {
@@ -196,6 +232,16 @@ export interface WorkspaceUpdateInput {
 
 export interface WorkspaceDeleteInput {
   workspaceId: string;
+}
+
+export interface WorkspaceCreateResult {
+  workspaceId: string;
+  workspacePath: string;
+  agentIds: string[];
+  primaryAgentId: string;
+  kickoffRunId?: string;
+  kickoffStatus?: string;
+  kickoffError?: string;
 }
 
 export interface AgentCreateInput {

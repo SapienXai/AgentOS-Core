@@ -6,17 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { WorkspaceCreateDialog } from "@/components/mission-control/workspace-create-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import type { MissionControlSnapshot, MissionResponse, MissionSubmission } from "@/lib/openclaw/types";
@@ -31,6 +21,7 @@ export function CommandBar({
   selectedNodeId,
   composeIntent,
   onRefresh,
+  onWorkspaceCreated,
   onMissionResponse,
   onMissionDispatchStart,
   onMissionDispatchComplete
@@ -44,6 +35,7 @@ export function CommandBar({
     agentId?: string;
   } | null;
   onRefresh: () => Promise<void>;
+  onWorkspaceCreated: (workspaceId: string) => void;
   onMissionResponse: (result: MissionResponse) => void;
   onMissionDispatchStart: (payload: {
     id: string;
@@ -59,11 +51,6 @@ export function CommandBar({
   const [thinking, setThinking] = useState<ThinkingLevel>("medium");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceDirectory, setWorkspaceDirectory] = useState("");
-  const [workspaceModel, setWorkspaceModel] = useState("");
-  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autoSelectionScopeRef = useRef<string | null>(null);
 
@@ -166,45 +153,6 @@ export function CommandBar({
     }
   };
 
-  const createWorkspace = async () => {
-    setIsCreatingWorkspace(true);
-
-    try {
-      const response = await fetch("/api/workspaces", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          name: workspaceName,
-          directory: workspaceDirectory || undefined,
-          modelId: workspaceModel || undefined
-        })
-      });
-
-      const result = (await response.json()) as { workspacePath?: string; agentId?: string; error?: string };
-
-      if (!response.ok || result.error) {
-        throw new Error(result.error || "OpenClaw could not create the workspace.");
-      }
-
-      toast.success("Workspace created in OpenClaw.", {
-        description: result.workspacePath
-      });
-      setWorkspaceName("");
-      setWorkspaceDirectory("");
-      setWorkspaceModel("");
-      setIsCreateOpen(false);
-      await onRefresh();
-    } catch (error) {
-      toast.error("Workspace creation failed.", {
-        description: error instanceof Error ? error.message : "Unknown workspace error."
-      });
-    } finally {
-      setIsCreatingWorkspace(false);
-    }
-  };
-
   return (
     <div className="panel-surface panel-glow rounded-[22px] border border-white/[0.08] bg-slate-950/72 px-2.5 py-2.5 shadow-[0_20px_58px_rgba(0,0,0,0.38)] backdrop-blur-2xl lg:rounded-[24px] lg:px-3 lg:py-2">
       <div className="flex flex-col gap-2 lg:gap-1.5">
@@ -251,71 +199,11 @@ export function CommandBar({
               Refresh
             </Button>
 
-            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-              <DialogTrigger asChild>
-                <Button variant="secondary" size="sm" className="h-7 rounded-full px-2 text-[11px]">
-                  <Plus className="mr-1.5 h-3 w-3" />
-                  Create workspace
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create a new OpenClaw workspace</DialogTitle>
-                  <DialogDescription>
-                    This creates a real workspace directory and a default OpenClaw agent entry.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="workspace-name">Workspace name</Label>
-                    <Input
-                      id="workspace-name"
-                      value={workspaceName}
-                      onChange={(event) => setWorkspaceName(event.target.value)}
-                      placeholder="AgentOS launch lane"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="workspace-directory">Directory override</Label>
-                    <Input
-                      id="workspace-directory"
-                      value={workspaceDirectory}
-                      onChange={(event) => setWorkspaceDirectory(event.target.value)}
-                      placeholder="Optional absolute directory"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="workspace-model">Default model</Label>
-                    <select
-                      id="workspace-model"
-                      value={workspaceModel}
-                      onChange={(event) => setWorkspaceModel(event.target.value)}
-                      className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
-                    >
-                      <option value="">Use OpenClaw default</option>
-                      {snapshot.models.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.id}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <DialogFooter>
-                  <Button variant="secondary" onClick={() => setIsCreateOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={createWorkspace} disabled={isCreatingWorkspace || !workspaceName.trim()}>
-                    {isCreatingWorkspace ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Create
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <WorkspaceCreateDialog
+              snapshot={snapshot}
+              onRefresh={onRefresh}
+              onWorkspaceCreated={onWorkspaceCreated}
+            />
           </div>
         </div>
 

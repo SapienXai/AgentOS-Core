@@ -13,8 +13,38 @@ export const dynamic = "force-dynamic";
 
 const workspaceSchema = z.object({
   name: z.string().min(1),
+  brief: z.string().optional(),
   directory: z.string().optional(),
-  modelId: z.string().optional()
+  modelId: z.string().optional(),
+  sourceMode: z.enum(["empty", "clone", "existing"]).optional(),
+  repoUrl: z.string().optional(),
+  existingPath: z.string().optional(),
+  template: z.enum(["software", "frontend", "backend", "research", "content"]).optional(),
+  teamPreset: z.enum(["solo", "core", "custom"]).optional(),
+  modelProfile: z.enum(["balanced", "fast", "quality"]).optional(),
+  rules: z
+    .object({
+      workspaceOnly: z.boolean().optional(),
+      generateStarterDocs: z.boolean().optional(),
+      generateMemory: z.boolean().optional(),
+      kickoffMission: z.boolean().optional()
+    })
+    .optional(),
+  agents: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        role: z.string().min(1),
+        name: z.string().min(1),
+        enabled: z.boolean(),
+        emoji: z.string().optional(),
+        theme: z.string().optional(),
+        skillId: z.string().optional(),
+        modelId: z.string().optional(),
+        isPrimary: z.boolean().optional()
+      })
+    )
+    .optional()
 });
 
 const workspaceUpdateSchema = z.object({

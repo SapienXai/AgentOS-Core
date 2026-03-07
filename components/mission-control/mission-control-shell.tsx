@@ -296,6 +296,10 @@ export function MissionControlShell({
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
             onRefresh={refresh}
+            onWorkspaceCreated={(workspaceId) => {
+              setActiveWorkspaceId(workspaceId);
+              setSelectedNodeId(workspaceId);
+            }}
             onMissionResponse={setLastMission}
             onMissionDispatchStart={setPendingMission}
             onMissionDispatchComplete={(status) => {
