@@ -111,6 +111,26 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%);
 }
 
+.mission-shell--light {
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.82), transparent 28%),
+    radial-gradient(circle at 82% 14%, rgba(229, 215, 204, 0.76), transparent 24%),
+    linear-gradient(180deg, #fdfaf6 0%, #f8f5f0 48%, #e5d7cc 100%);
+}
+
+.mission-shell--light::before {
+  background-image:
+    radial-gradient(circle, rgba(148, 112, 88, 0.16) 1px, transparent 1.65px);
+  opacity: 0.26;
+  mask-image: radial-gradient(circle at center, black 44%, transparent 100%);
+}
+
+.mission-shell--light::after {
+  background:
+    radial-gradient(circle at center, transparent 42%, rgba(214, 196, 183, 0.3) 84%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.46), transparent 18%);
+}
+
 .mission-canvas-frame::before {
   content: "";
   position: absolute;
@@ -120,6 +140,12 @@
   background:
     radial-gradient(circle at center, rgba(56, 189, 248, 0.08), transparent 58%),
     linear-gradient(180deg, rgba(4, 11, 22, 0.16), rgba(4, 11, 22, 0.02));
+}
+
+.mission-shell--light .mission-canvas-frame::before {
+  background:
+    radial-gradient(circle at center, rgba(229, 215, 204, 0.5), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(229, 215, 204, 0.08));
 }
 
 .mission-canvas-pattern {
@@ -134,12 +160,23 @@
   -webkit-mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.98) 62%, rgba(0, 0, 0, 0.9) 84%, transparent 100%);
 }
 
+.mission-shell--light .mission-canvas-pattern {
+  background-image:
+    linear-gradient(rgba(153, 122, 100, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(153, 122, 100, 0.12) 1px, transparent 1px),
+    radial-gradient(circle, rgba(185, 145, 114, 0.24) 1.7px, transparent 2px);
+}
+
 .react-flow__renderer {
   background: transparent;
 }
 
 .react-flow__edge path {
   filter: drop-shadow(0 0 8px rgba(89, 153, 255, 0.08));
+}
+
+.mission-shell--light .react-flow__edge path {
+  filter: drop-shadow(0 0 8px rgba(168, 132, 106, 0.14));
 }
 
 .react-flow__controls-button {

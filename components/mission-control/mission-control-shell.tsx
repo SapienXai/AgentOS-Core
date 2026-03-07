@@ -1,5 +1,6 @@
 "use client";
 
+import { MoonStar, SunMedium } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { MissionCanvas } from "@/components/mission-control/canvas";
@@ -25,6 +26,10 @@ type ComposeIntent = {
   agentId?: string;
 };
 
+type SurfaceTheme = "dark" | "light";
+
+const surfaceThemeStorageKey = "mission-control-surface-theme";
+
 export function MissionControlShell({
   initialSnapshot
 }: {
@@ -43,6 +48,7 @@ export function MissionControlShell({
   const [hiddenRuntimeIds, setHiddenRuntimeIds] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
 
   useEffect(() => {
     if (!activeWorkspaceId || snapshot.workspaces.some((workspace) => workspace.id === activeWorkspaceId)) {
@@ -90,8 +96,25 @@ export function MissionControlShell({
     }
   }, [snapshot.runtimes, pendingMission]);
 
+  useEffect(() => {
+    const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
+
+    if (storedTheme === "dark" || storedTheme === "light") {
+      setSurfaceTheme(storedTheme);
+    }
+  }, []);
+
+  useEffect(() => {
+    globalThis.localStorage?.setItem(surfaceThemeStorageKey, surfaceTheme);
+  }, [surfaceTheme]);
+
   return (
-    <div className="mission-shell relative min-h-screen overflow-hidden">
+    <div
+      className={cn(
+        "mission-shell relative min-h-screen overflow-hidden",
+        surfaceTheme === "light" && "mission-shell--light"
+      )}
+    >
       <div className="relative flex min-h-screen flex-col gap-4 px-4 pb-4 pt-5 lg:h-screen lg:block lg:px-0 lg:pb-0 lg:pt-0">
         <div
           className={cn(
@@ -120,17 +143,83 @@ export function MissionControlShell({
             isInspectorOpen ? "lg:right-[442px]" : "lg:right-[118px]"
           )}
         >
-          <div className="mission-canvas-frame relative h-full overflow-hidden rounded-[32px] border border-white/[0.05] bg-transparent">
+          <div
+            className={cn(
+              "mission-canvas-frame relative h-full overflow-hidden rounded-[32px] border",
+              surfaceTheme === "light"
+                ? "border-[#d9c9bc]/80 bg-[rgba(255,250,245,0.38)] shadow-[0_24px_60px_rgba(161,125,101,0.12)]"
+                : "border-white/[0.05] bg-transparent"
+            )}
+          >
             <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
 
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-2 pt-2 lg:px-0 lg:pt-6">
-              <div className="rounded-[20px] border border-white/[0.08] bg-slate-950/55 px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-                <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Canvas</p>
-                <h2 className="mt-1 font-display text-[1.08rem] text-white">Orchestration Surface</h2>
+              <div
+                className={cn(
+                  "rounded-[20px] border px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.28)] backdrop-blur-xl",
+                  surfaceTheme === "light"
+                    ? "border-[#d9c9bc]/90 bg-[#f8f5f0]/88 shadow-[0_18px_42px_rgba(161,125,101,0.14)]"
+                    : "border-white/[0.08] bg-slate-950/55"
+                )}
+              >
+                <p
+                  className={cn(
+                    "text-[11px] uppercase tracking-[0.28em]",
+                    surfaceTheme === "light" ? "text-[#8a7261]" : "text-slate-500"
+                  )}
+                >
+                  Canvas
+                </p>
+                <h2
+                  className={cn(
+                    "mt-1 font-display text-[1.08rem]",
+                    surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
+                  )}
+                >
+                  Orchestration Surface
+                </h2>
               </div>
 
-              <div className="hidden rounded-full border border-cyan-300/10 bg-slate-950/45 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-slate-400 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl lg:flex">
-                OpenClaw runtime topology
+              <div
+                className={cn(
+                  "pointer-events-auto hidden items-center gap-3 rounded-full border px-3 py-2 text-[10px] uppercase tracking-[0.3em] shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl lg:flex",
+                  surfaceTheme === "light"
+                    ? "border-[#d9c9bc]/90 bg-[#f8f5f0]/86 text-[#8a7261] shadow-[0_18px_42px_rgba(161,125,101,0.14)]"
+                    : "border-cyan-300/10 bg-slate-950/45 text-slate-400"
+                )}
+              >
+                <span>OpenClaw runtime topology</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label={surfaceTheme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+                  aria-checked={surfaceTheme === "light"}
+                  aria-pressed={surfaceTheme === "light"}
+                  onClick={() =>
+                    setSurfaceTheme((current) => (current === "light" ? "dark" : "light"))
+                  }
+                  className={cn(
+                    "relative inline-flex h-7 w-14 items-center rounded-full border transition-colors",
+                    surfaceTheme === "light"
+                      ? "border-[#d0bcae] bg-[#eaded3]"
+                      : "border-white/10 bg-white/[0.08]"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute left-1 inline-flex h-5 w-5 items-center justify-center rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.18)] transition-transform",
+                      surfaceTheme === "light"
+                        ? "translate-x-7 bg-[#c8946f] text-white"
+                        : "translate-x-0 bg-cyan-300 text-slate-950"
+                    )}
+                  >
+                    {surfaceTheme === "light" ? (
+                      <SunMedium className="h-3 w-3" />
+                    ) : (
+                      <MoonStar className="h-3 w-3" />
+                    )}
+                  </span>
+                </button>
               </div>
             </div>
 
