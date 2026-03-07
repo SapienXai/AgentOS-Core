@@ -19,6 +19,7 @@ export type RuntimeNodeData = Record<string, unknown> & {
   runtime: RuntimeRecord;
   emphasis: boolean;
   pendingCreation?: boolean;
+  justCreated?: boolean;
   onReply?: (runtime: RuntimeRecord) => void;
   onCopyPrompt?: (runtime: RuntimeRecord) => void;
   onHide?: (runtimeId: string) => void;

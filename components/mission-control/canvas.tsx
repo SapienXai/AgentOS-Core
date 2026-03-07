@@ -4,11 +4,19 @@ import {
   ReactFlow,
   type Edge,
   type Node,
+  type ReactFlowInstance,
   useEdgesState,
   useNodesState
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction
+} from "react";
 
 import type {
   AgentNodeData,
@@ -38,6 +46,7 @@ const nodeTypes = {
   agent: AgentNode,
   runtime: RuntimeNode
 };
+const justCreatedRuntimeDurationMs = 12000;
 
 export function MissionCanvas({
   snapshot,
@@ -60,10 +69,17 @@ export function MissionCanvas({
   onHideRuntime: (runtimeId: string) => void;
   onSelectNode: (nodeId: string) => void;
 }) {
+  const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
+  const pendingMissionRef = useRef<PendingMissionCard | null>(null);
+  const handledPendingMissionIdsRef = useRef<Set<string>>(new Set());
+  const creationTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const [justCreatedRuntimeIds, setJustCreatedRuntimeIds] = useState<string[]>([]);
+  const [focusRuntimeId, setFocusRuntimeId] = useState<string | null>(null);
   const initialGraph = buildCanvasGraph(
     snapshot,
     activeWorkspaceId,
     pendingMission,
+    justCreatedRuntimeIds,
     hiddenRuntimeIds,
     onReplyRuntime,
     onCopyRuntimePrompt,
@@ -77,6 +93,7 @@ export function MissionCanvas({
       snapshot,
       activeWorkspaceId,
       pendingMission,
+      justCreatedRuntimeIds,
       hiddenRuntimeIds,
       onReplyRuntime,
       onCopyRuntimePrompt,
@@ -88,6 +105,7 @@ export function MissionCanvas({
     snapshot,
     activeWorkspaceId,
     pendingMission,
+    justCreatedRuntimeIds,
     hiddenRuntimeIds,
     onReplyRuntime,
     onCopyRuntimePrompt,
@@ -105,11 +123,87 @@ export function MissionCanvas({
     );
   }, [selectedNodeId, setNodes]);
 
+  useEffect(() => {
+    if (pendingMission) {
+      pendingMissionRef.current = pendingMission;
+    }
+  }, [pendingMission]);
+
+  useEffect(() => {
+    const candidatePendingMission = pendingMission ?? pendingMissionRef.current;
+
+    if (!candidatePendingMission || handledPendingMissionIdsRef.current.has(candidatePendingMission.id)) {
+      return;
+    }
+
+    const resolvedRuntime = snapshot.runtimes
+      .filter(
+        (runtime) =>
+          !hiddenRuntimeIds.includes(runtime.id) &&
+          runtime.agentId === candidatePendingMission.agentId &&
+          (runtime.updatedAt ?? 0) >= candidatePendingMission.submittedAt - 1500
+      )
+      .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))[0];
+
+    if (!resolvedRuntime) {
+      return;
+    }
+
+    handledPendingMissionIdsRef.current.add(candidatePendingMission.id);
+    pendingMissionRef.current = null;
+    markRuntimeAsJustCreated(
+      resolvedRuntime.id,
+      setJustCreatedRuntimeIds,
+      creationTimeoutsRef,
+      setFocusRuntimeId
+    );
+    onSelectNode(resolvedRuntime.id);
+  }, [snapshot.runtimes, pendingMission, hiddenRuntimeIds, onSelectNode]);
+
+  useEffect(() => {
+    return () => {
+      creationTimeoutsRef.current.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      creationTimeoutsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!focusRuntimeId || !reactFlowRef.current) {
+      return;
+    }
+
+    const targetNode = nodes.find((node) => node.id === focusRuntimeId);
+
+    if (!targetNode) {
+      return;
+    }
+
+    reactFlowRef.current.setCenter(
+      targetNode.position.x + (targetNode.width ?? 212) / 2,
+      targetNode.position.y + (targetNode.height ?? 148) / 2,
+      {
+        zoom: Math.max(reactFlowRef.current.getZoom(), 0.9),
+        duration: 650
+      }
+    );
+
+    const timeoutId = setTimeout(() => {
+      setFocusRuntimeId((current) => (current === focusRuntimeId ? null : current));
+    }, 900);
+
+    return () => clearTimeout(timeoutId);
+  }, [focusRuntimeId, nodes]);
+
   return (
     <ReactFlow
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      onInit={(instance) => {
+        reactFlowRef.current = instance;
+      }}
       elevateNodesOnSelect={false}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
@@ -141,6 +235,7 @@ function buildCanvasGraph(
   snapshot: MissionControlSnapshot,
   activeWorkspaceId: string | null,
   pendingMission: PendingMissionCard | null,
+  justCreatedRuntimeIds: string[],
   hiddenRuntimeIds: string[],
   onReplyRuntime: (runtime: RuntimeRecord) => void,
   onCopyRuntimePrompt: (runtime: RuntimeRecord) => void,
@@ -201,18 +296,22 @@ function buildCanvasGraph(
       }
 
       visibleRuntimes.forEach((runtime, runtimeIndex) => {
+        const isPendingRuntime = runtime.id.startsWith("pending-runtime:");
+        const isJustCreatedRuntime = justCreatedRuntimeIds.includes(runtime.id);
+
         contentNodes.push({
           id: runtime.id,
           type: "runtime",
-          draggable: runtime.id.startsWith("pending-runtime:") ? false : true,
-          selectable: !runtime.id.startsWith("pending-runtime:"),
+          draggable: isPendingRuntime ? false : true,
+          selectable: !isPendingRuntime,
           position: { x: runtimeX, y: agentY + runtimeIndex * 88 + 10 },
-          zIndex: 10,
+          zIndex: isPendingRuntime ? 40 : isJustCreatedRuntime ? 28 : 10,
           selected: false,
           data: {
             runtime,
             emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
-            pendingCreation: runtime.id.startsWith("pending-runtime:"),
+            pendingCreation: isPendingRuntime,
+            justCreated: isJustCreatedRuntime,
             onReply: onReplyRuntime,
             onCopyPrompt: onCopyRuntimePrompt,
             onHide: onHideRuntime
@@ -336,4 +435,26 @@ function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]
       height: previous.height
     };
   });
+}
+
+function markRuntimeAsJustCreated(
+  runtimeId: string,
+  setJustCreatedRuntimeIds: Dispatch<SetStateAction<string[]>>,
+  creationTimeoutsRef: MutableRefObject<Map<string, ReturnType<typeof setTimeout>>>,
+  setFocusRuntimeId: Dispatch<SetStateAction<string | null>>
+) {
+  setJustCreatedRuntimeIds((current) => (current.includes(runtimeId) ? current : [...current, runtimeId]));
+  setFocusRuntimeId(runtimeId);
+
+  const existingTimeout = creationTimeoutsRef.current.get(runtimeId);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+  }
+
+  const timeoutId = setTimeout(() => {
+    setJustCreatedRuntimeIds((current) => current.filter((id) => id !== runtimeId));
+    creationTimeoutsRef.current.delete(runtimeId);
+  }, justCreatedRuntimeDurationMs);
+
+  creationTimeoutsRef.current.set(runtimeId, timeoutId);
 }

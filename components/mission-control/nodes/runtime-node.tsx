@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Copy, CornerDownLeft, EyeOff, MoreHorizontal, TimerReset } from "lucide-react";
+import { Copy, CornerDownLeft, EyeOff, MoreHorizontal, Sparkles, TimerReset } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -12,7 +12,6 @@ import { badgeVariantForRuntimeStatus, formatTokens, shortId, toneForRuntimeStat
 import { cn } from "@/lib/utils";
 
 type RuntimeFlowNode = Node<RuntimeNodeData, "runtime">;
-const materializationTiles = Array.from({ length: 24 }, (_, index) => index);
 
 export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
   const tone = toneForRuntimeStatus(data.runtime.status);
@@ -21,6 +20,7 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
       ? shortId(data.runtime.runId, 10)
       : shortId(data.runtime.taskId || data.runtime.sessionId);
   const isPendingCreation = Boolean(data.pendingCreation);
+  const isJustCreated = Boolean(data.justCreated);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const badgeVariant = isPendingCreation ? "warning" : badgeVariantForRuntimeStatus(data.runtime.status);
@@ -42,39 +42,65 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
 
   return (
     <motion.div
-      initial={isPendingCreation ? { opacity: 0, scale: 0.94, x: 12 } : { opacity: 0, x: 8 }}
-      animate={isPendingCreation ? { opacity: 1, scale: 1, x: 0 } : { opacity: 1, x: 0 }}
+      initial={
+        isPendingCreation
+          ? { opacity: 0, scale: 0.9, y: -10 }
+          : isJustCreated
+            ? { opacity: 0, scale: 0.95, y: 10 }
+            : { opacity: 0, x: 8 }
+      }
+      animate={
+        isPendingCreation
+          ? { opacity: 1, scale: 1, y: 0 }
+          : isJustCreated
+            ? { opacity: 1, scale: [1, 1.015, 1], y: 0 }
+            : { opacity: 1, x: 0 }
+      }
+      transition={
+        isJustCreated
+          ? {
+              duration: 0.7,
+              times: [0, 0.45, 1]
+            }
+          : undefined
+      }
       className={cn(
         "relative w-[212px] overflow-hidden rounded-[16px] border border-white/[0.1] bg-[linear-gradient(180deg,rgba(15,24,40,0.94),rgba(8,13,24,0.94))] px-3 py-2.5 shadow-[0_16px_28px_rgba(0,0,0,0.26)] backdrop-blur-xl",
         data.emphasis ? "opacity-100" : "opacity-72",
         selected && "border-cyan-300/[0.45] shadow-[0_18px_42px_rgba(34,211,238,0.16)]",
-        isPendingCreation && "border-cyan-300/20 bg-[linear-gradient(180deg,rgba(16,30,52,0.96),rgba(8,16,30,0.96))] shadow-[0_20px_48px_rgba(34,211,238,0.14)]"
+        isPendingCreation && "border-cyan-300/30 bg-[linear-gradient(180deg,rgba(17,31,52,0.98),rgba(8,16,30,0.98))] shadow-[0_24px_54px_rgba(34,211,238,0.22)]",
+        isJustCreated &&
+          "border-cyan-200/40 bg-[linear-gradient(180deg,rgba(20,28,43,0.98),rgba(10,15,28,0.98))] shadow-[0_22px_52px_rgba(125,211,252,0.18)]",
+        data.runtime.status === "completed" &&
+          !isPendingCreation &&
+          !isJustCreated &&
+          "border-white/[0.06] bg-[linear-gradient(180deg,rgba(13,18,30,0.88),rgba(8,12,22,0.88))] opacity-[0.86]"
       )}
     >
       {isPendingCreation ? (
         <>
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.14),rgba(15,23,42,0))]" />
-          <div className="pointer-events-none absolute inset-0 grid grid-cols-6 gap-1 px-2.5 py-2">
-            {materializationTiles.map((tile) => (
-              <motion.span
-                key={tile}
-                className="rounded-[4px] bg-cyan-300/18"
-                initial={{ opacity: 0, scale: 0.65 }}
-                animate={{ opacity: [0.12, 0.7, 0.2], scale: [0.75, 1, 0.84] }}
-                transition={{
-                  duration: 1.1,
-                  repeat: Number.POSITIVE_INFINITY,
-                  repeatType: "mirror",
-                  delay: tile * 0.035
-                }}
-              />
-            ))}
-          </div>
           <motion.div
-            className="pointer-events-none absolute inset-y-0 left-[-20%] w-[34%] bg-[linear-gradient(90deg,transparent,rgba(125,211,252,0.26),transparent)] blur-lg"
+            className="pointer-events-none absolute inset-[-18px] rounded-[24px] border border-cyan-200/18"
+            animate={{ opacity: [0.18, 0.42, 0.18], scale: [0.98, 1.03, 0.98] }}
+            transition={{ duration: 1.7, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+          />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(125,211,252,0.22),transparent_44%),linear-gradient(180deg,rgba(15,23,42,0.18),rgba(15,23,42,0))]" />
+          <motion.div
+            className="pointer-events-none absolute left-[-28%] top-0 h-px w-[44%] bg-[linear-gradient(90deg,transparent,rgba(186,230,253,0.85),transparent)] blur-[1px]"
             animate={{ x: ["0%", "320%"] }}
             transition={{ duration: 1.6, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
           />
+        </>
+      ) : null}
+
+      {isJustCreated ? (
+        <>
+          <motion.div
+            className="pointer-events-none absolute inset-[-14px] rounded-[22px] border border-cyan-100/16"
+            animate={{ opacity: [0.1, 0.34, 0.1], scale: [0.985, 1.02, 0.985] }}
+            transition={{ duration: 2.2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+          />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(186,230,253,0.18),transparent_36%)]" />
         </>
       ) : null}
 
@@ -101,14 +127,14 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
                       : "bg-amber-200"
               }
             />
-            {isPendingCreation ? "Run spawning" : data.runtime.source === "turn" ? "Run" : "Task / Run"}
+            {isPendingCreation ? "Creating task" : data.runtime.source === "turn" ? "Run" : "Task / Run"}
           </div>
           <p className="mt-1.5 truncate font-display text-[0.95rem] text-white">{data.runtime.title}</p>
           <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">{runtimeLabel}</p>
         </div>
 
         {isPendingCreation ? (
-          <div className="rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300">
+          <div className="rounded-full border border-cyan-200/16 bg-cyan-100/8 p-1.5 text-cyan-100">
             <TimerReset className="h-3 w-3" />
           </div>
         ) : (
@@ -164,6 +190,12 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
 
       <div className="relative mt-2.5 flex flex-wrap items-center gap-1.5">
         <Badge variant={badgeVariant}>{isPendingCreation ? "materializing" : data.runtime.status}</Badge>
+        {isJustCreated ? (
+          <Badge variant="default" className="gap-1 border-cyan-100/20 bg-cyan-100/12 text-cyan-50">
+            <Sparkles className="h-3 w-3" />
+            new
+          </Badge>
+        ) : null}
         <span className={cn("text-[9px] uppercase tracking-[0.18em]", tone)}>{formatTokens(data.runtime.tokenUsage?.total)} tokens</span>
       </div>
 
@@ -171,7 +203,9 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
         <p className="text-[12px] leading-4 text-slate-100">{data.runtime.subtitle}</p>
         <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-slate-500">
           {isPendingCreation
-            ? "Syncing with gateway"
+            ? "Launching on the canvas"
+            : isJustCreated
+              ? "Just created"
             : data.runtime.ageMs
               ? `${Math.round(data.runtime.ageMs / 60000)}m active`
               : "live"}
