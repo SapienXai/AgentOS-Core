@@ -1,5 +1,10 @@
 <div align="center">
-  <img src="./public/readme/agentos-core.webp" alt="OpenClaw Mission Control main preview" width="100%" />
+  <a href="https://youtu.be/KKX52CFtZrI">
+    <img src="./public/readme/agentos-core.webp" alt="OpenClaw Mission Control main preview" width="100%" />
+  </a>
+  <p>
+    <a href="https://youtu.be/KKX52CFtZrI"><strong>Watch Demo</strong></a>
+  </p>
 </div>
 
 <div align="center">
@@ -36,6 +41,12 @@ Mission Control turns OpenClaw's real operational surface into a single UI for o
 </p>
 
 </div>
+
+## Demo
+
+The product walkthrough is available on YouTube:
+
+[Watch the OpenClaw Mission Control demo](https://youtu.be/KKX52CFtZrI)
 
 ## Why This Is Different
 
