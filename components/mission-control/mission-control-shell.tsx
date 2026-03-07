@@ -120,7 +120,9 @@ export function MissionControlShell({
             isInspectorOpen ? "lg:right-[442px]" : "lg:right-[118px]"
           )}
         >
-          <div className="relative h-full overflow-hidden rounded-[32px] border border-white/[0.05] bg-transparent">
+          <div className="mission-canvas-frame relative h-full overflow-hidden rounded-[32px] border border-white/[0.05] bg-transparent">
+            <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
+
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-2 pt-2 lg:px-0 lg:pt-6">
               <div className="rounded-[20px] border border-white/[0.08] bg-slate-950/55 px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.28)] backdrop-blur-xl">
                 <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Canvas</p>
@@ -132,7 +134,7 @@ export function MissionControlShell({
               </div>
             </div>
 
-            <div className="absolute inset-0 pt-24 lg:pt-0">
+            <div className="absolute inset-0 z-10 pt-24 lg:pt-0">
               <MissionCanvas
                 snapshot={snapshot}
                 activeWorkspaceId={activeWorkspaceId}

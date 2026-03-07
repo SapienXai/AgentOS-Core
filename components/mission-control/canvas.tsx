@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  Background,
-  BackgroundVariant,
   ReactFlow,
   type Edge,
   type Node,
@@ -112,6 +110,7 @@ export function MissionCanvas({
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      elevateNodesOnSelect={false}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeClick={(_, node) => {
@@ -134,9 +133,7 @@ export function MissionCanvas({
       }}
       proOptions={{ hideAttribution: true }}
       className="rounded-[30px]"
-    >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1.15} color="rgba(91, 160, 255, 0.2)" />
-    </ReactFlow>
+    />
   );
 }
 
@@ -272,6 +269,7 @@ function buildEdgesForNodes(runtimes: RuntimeRecord[], nodes: CanvasNode[]) {
       sourceHandle: "source-right",
       targetHandle: "target-left",
       type: "simplebezier",
+      zIndex: 4,
       animated: runtime.status === "active",
       style: {
         stroke: runtime.status === "active" ? "rgba(107, 190, 255, 0.85)" : "rgba(148, 163, 184, 0.28)",

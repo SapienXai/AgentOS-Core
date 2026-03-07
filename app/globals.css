@@ -111,12 +111,31 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%);
 }
 
-.react-flow__renderer {
-  background: transparent;
+.mission-canvas-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at center, rgba(56, 189, 248, 0.08), transparent 58%),
+    linear-gradient(180deg, rgba(4, 11, 22, 0.16), rgba(4, 11, 22, 0.02));
 }
 
-.react-flow__background {
-  opacity: 0.62;
+.mission-canvas-pattern {
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(125, 211, 252, 0.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.13) 1px, transparent 1px),
+    radial-gradient(circle, rgba(96, 165, 250, 0.28) 1.7px, transparent 2px);
+  background-size: 88px 88px, 88px 88px, 22px 22px;
+  background-position: 0 0, 0 0, 2px 2px;
+  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.98) 62%, rgba(0, 0, 0, 0.9) 84%, transparent 100%);
+  -webkit-mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.98) 62%, rgba(0, 0, 0, 0.9) 84%, transparent 100%);
+}
+
+.react-flow__renderer {
+  background: transparent;
 }
 
 .react-flow__edge path {
