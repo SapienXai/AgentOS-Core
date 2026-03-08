@@ -99,8 +99,7 @@ export function MissionControlShell({
   const activeRuntimeCount = snapshot.runtimes.filter(
     (runtime) => runtime.status === "active" || runtime.status === "queued"
   ).length;
-  const isOpenClawReady =
-    snapshot.diagnostics.installed && snapshot.diagnostics.loaded && snapshot.diagnostics.rpcOk;
+  const isOpenClawReady = snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
   const updateInstallDescriptor = [
     snapshot.diagnostics.updatePackageManager,
     snapshot.diagnostics.updateInstallKind
@@ -180,21 +179,23 @@ export function MissionControlShell({
       onboardingSuccessTimeoutRef.current = null;
     }
 
-    if (isOpenClawReady && (onboardingRunState === "running" || onboardingRunState === "success")) {
-      setOnboardingRunState("success");
-      setOnboardingPhase("ready");
-      setOnboardingStatusMessage(null);
-      setOnboardingResultMessage((current) => current || "OpenClaw is ready. Entering Mission Control...");
-      setShowOnboardingReadyState(true);
-      onboardingSuccessTimeoutRef.current = globalThis.setTimeout(() => {
+    if (isOpenClawReady) {
+      if (onboardingRunState !== "idle") {
+        setOnboardingRunState("success");
+        setOnboardingPhase("ready");
+        setOnboardingStatusMessage(null);
+        setOnboardingResultMessage("OpenClaw is ready. Entering Mission Control...");
+        setShowOnboardingReadyState(true);
+        onboardingSuccessTimeoutRef.current = globalThis.setTimeout(() => {
+          setShowOnboardingReadyState(false);
+        }, 1100);
+      } else {
         setShowOnboardingReadyState(false);
-      }, 1100);
+      }
       return;
     }
 
-    if (!isOpenClawReady) {
-      setShowOnboardingReadyState(false);
-    }
+    setShowOnboardingReadyState(false);
   }, [isOpenClawReady, onboardingRunState]);
 
   useEffect(() => {
@@ -1361,6 +1362,13 @@ function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
     };
   }
 
+  if (snapshot.diagnostics.rpcOk) {
+    return {
+      label: "Enter Mission Control",
+      description: "OpenClaw is online."
+    };
+  }
+
   if (!snapshot.diagnostics.loaded) {
     return {
       label: "Prepare local gateway",
@@ -1377,8 +1385,8 @@ function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
   }
 
   return {
-    label: "Enter Mission Control",
-    description: "OpenClaw is already online."
+    label: "Start OpenClaw",
+    description: "Start the local gateway service and wait for a live RPC connection."
   };
 }
 

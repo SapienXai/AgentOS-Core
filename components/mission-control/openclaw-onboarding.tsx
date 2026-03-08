@@ -4,7 +4,6 @@ import { ArrowRight, Check, LoaderCircle, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
-import { compactPath } from "@/lib/openclaw/presenters";
 import type {
   MissionControlSnapshot,
   OpenClawOnboardingPhase
@@ -49,6 +48,7 @@ export function OpenClawOnboarding({
   const steps = buildSteps(snapshot, phase);
   const statusCopy = statusMessage || resultMessage || actionDescription;
   const showDetails = runState !== "idle" || Boolean(manualCommand) || log.trim().length > 0;
+  const phaseLabel = resolvePhaseLabel(phase, snapshot);
 
   return (
     <motion.div
@@ -66,9 +66,9 @@ export function OpenClawOnboarding({
         initial={{ opacity: 0, y: 18, scale: 0.985 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         className={cn(
-          "w-full max-w-[520px] rounded-[24px] border p-4 shadow-[0_24px_72px_rgba(0,0,0,0.22)] backdrop-blur-2xl lg:p-5",
+          "w-[450px] max-w-[calc(100vw-24px)] rounded-[20px] border p-3.5 shadow-[0_20px_56px_rgba(0,0,0,0.2)] backdrop-blur-2xl lg:p-4",
           surfaceTheme === "light"
-            ? "border-[#dccabd]/90 bg-[rgba(255,250,246,0.9)] text-[#47362b] shadow-[0_22px_64px_rgba(161,125,101,0.16)]"
+            ? "border-[#dccabd]/90 bg-[rgba(255,250,246,0.9)] text-[#47362b] shadow-[0_18px_50px_rgba(161,125,101,0.15)]"
             : "border-white/10 bg-[rgba(6,10,18,0.84)] text-slate-100"
         )}
       >
@@ -112,10 +112,10 @@ export function OpenClawOnboarding({
           </span>
         </div>
 
-        <div className="mt-4">
+        <div className="mt-3.5">
           <p
             className={cn(
-              "text-[9px] uppercase tracking-[0.24em]",
+              "text-[8px] uppercase tracking-[0.22em]",
               surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
             )}
           >
@@ -123,7 +123,7 @@ export function OpenClawOnboarding({
           </p>
           <h1
             className={cn(
-              "mt-1.5 font-display text-[1.55rem] leading-[1.75rem]",
+              "mt-1.5 font-display text-[1.32rem] leading-[1.5rem]",
               surfaceTheme === "light" ? "text-[#33251c]" : "text-white"
             )}
           >
@@ -131,7 +131,7 @@ export function OpenClawOnboarding({
           </h1>
           <p
             className={cn(
-              "mt-2.5 text-[13px] leading-[1.35rem]",
+              "mt-2 text-[12px] leading-[1.2rem]",
               surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-300"
             )}
           >
@@ -140,12 +140,12 @@ export function OpenClawOnboarding({
           </p>
         </div>
 
-        <div className="mt-4.5 space-y-2">
+        <div className="mt-3.5 space-y-1.5">
           {steps.map((step, index) => (
             <div
               key={step.id}
               className={cn(
-                "flex items-start gap-2.5 rounded-[16px] border px-3 py-2.5",
+                "flex items-center gap-2 rounded-[14px] border px-2.5 py-2",
                 stepContainerClassName(step.state, surfaceTheme)
               )}
             >
@@ -158,13 +158,13 @@ export function OpenClawOnboarding({
                 {step.state === "complete" ? <Check className="h-3 w-3" /> : index + 1}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2.5">
-                  <p className={cn("text-[13px]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className={cn("text-[12px]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
                     {step.label}
                   </p>
                   <span
                     className={cn(
-                      "rounded-full px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
+                      "rounded-full px-1.5 py-0.5 text-[7px] uppercase tracking-[0.16em]",
                       stepBadgeClassName(step.state, surfaceTheme)
                     )}
                   >
@@ -172,13 +172,13 @@ export function OpenClawOnboarding({
                       ? "Ready"
                       : step.state === "current"
                         ? "Active"
-                        : "Pending"}
+                      : "Pending"}
                   </span>
                 </div>
                 <p
                   className={cn(
-                    "mt-0.5 text-[11px] leading-[1.05rem]",
-                    surfaceTheme === "light" ? "text-[#7d6758]" : "text-slate-400"
+                    "mt-0.5 text-[9px] leading-[0.95rem]",
+                    surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
                   )}
                 >
                   {step.description}
@@ -190,97 +190,36 @@ export function OpenClawOnboarding({
 
         <div
           className={cn(
-            "mt-4 rounded-[18px] border px-3.5 py-2.5",
+            "mt-3 rounded-[14px] border",
             surfaceTheme === "light"
               ? "border-[#e5d5c9] bg-[#fffaf6]"
-              : "border-white/8 bg-white/[0.03]"
+              : "border-white/8 bg-[rgba(255,255,255,0.02)]"
           )}
         >
-          <p
-            className={cn(
-              "text-[9px] uppercase tracking-[0.2em]",
-              surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-            )}
-          >
-            Current status
-          </p>
-          <p
-            className={cn(
-              "mt-1.5 text-[13px] leading-[1.35rem]",
-              surfaceTheme === "light" ? "text-[#5f4b3e]" : "text-slate-300"
-            )}
-          >
-            {statusCopy}
-          </p>
-          <div
-            className={cn(
-              "mt-2.5 border-t pt-2.5",
-              surfaceTheme === "light" ? "border-[#ebddd2]" : "border-white/8"
-            )}
-          >
+          <div className="px-3 py-2">
             <p
               className={cn(
-                "text-[9px] uppercase tracking-[0.2em]",
+                "text-[8px] uppercase tracking-[0.18em]",
                 surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
               )}
             >
-              Workspace root
+              Current status
             </p>
             <p
               className={cn(
-                "mt-1.5 break-all font-mono text-[10px] leading-[1rem]",
-                surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                "mt-1 text-[12px] leading-[1.2rem]",
+                surfaceTheme === "light" ? "text-[#5f4b3e]" : "text-slate-300"
               )}
             >
-              {compactPath(snapshot.diagnostics.workspaceRoot)}
+              {statusCopy}
             </p>
           </div>
-        </div>
 
-        {showDetails ? (
-          <div
-            className={cn(
-              "mt-3.5 rounded-[18px] border",
-              surfaceTheme === "light"
-                ? "border-[#e5d5c9] bg-[#fffaf6]"
-                : "border-white/8 bg-[rgba(255,255,255,0.02)]"
-            )}
-          >
-            <div
-              className={cn(
-                "flex items-center justify-between border-b px-3.5 py-2.5",
-                surfaceTheme === "light" ? "border-[#ebddd2]" : "border-white/8"
-              )}
-            >
-              <p
-                className={cn(
-                  "text-[9px] uppercase tracking-[0.2em]",
-                  surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-                )}
-              >
-                Setup log
-              </p>
-              <span
-                className={
-                  surfaceTheme === "light" ? "text-[11px] text-[#8c7362]" : "text-[11px] text-slate-400"
-                }
-              >
-                {phase ? phase.replace("-", " ") : "waiting"}
-              </span>
-            </div>
-            <pre
-              className={cn(
-                "max-h-[156px] min-h-[92px] overflow-auto whitespace-pre-wrap break-words px-3.5 py-3 font-mono text-[10px] leading-[1rem]",
-                surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-              )}
-            >
-              {log ||
-                "No command output yet.\n\nStart the flow and Mission Control will stream each setup step here."}
-            </pre>
-            {manualCommand ? (
+          {showDetails ? (
+            <>
               <div
                 className={cn(
-                  "border-t px-3.5 py-2.5",
+                  "flex items-center justify-between border-y px-3.5 py-2",
                   surfaceTheme === "light" ? "border-[#ebddd2]" : "border-white/8"
                 )}
               >
@@ -290,42 +229,75 @@ export function OpenClawOnboarding({
                     surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
                   )}
                 >
-                  Manual fallback
+                  Setup log
                 </p>
-                <p
+                <span
+                  className={
+                    surfaceTheme === "light" ? "text-[11px] text-[#8c7362]" : "text-[11px] text-slate-400"
+                  }
+                >
+                  {phaseLabel}
+                </span>
+              </div>
+              <pre
+                className={cn(
+                  "max-h-[140px] min-h-[80px] overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[9px] leading-[0.95rem]",
+                  surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                )}
+              >
+                {log ||
+                  "No command output yet.\n\nStart the flow and Mission Control will stream each setup step here."}
+              </pre>
+              {manualCommand ? (
+                <div
                   className={cn(
-                    "mt-1.5 break-all font-mono text-[10px] leading-[1rem]",
-                    surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                    "border-t px-3.5 py-2.5",
+                    surfaceTheme === "light" ? "border-[#ebddd2]" : "border-white/8"
                   )}
                 >
-                  {manualCommand}
-                </p>
-                {docsUrl ? (
-                  <a
-                    href={docsUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                  <p
                     className={cn(
-                      "mt-2.5 inline-flex items-center gap-1 text-[10px] underline underline-offset-4",
-                      surfaceTheme === "light" ? "text-[#7f6554]" : "text-slate-300"
+                      "text-[9px] uppercase tracking-[0.2em]",
+                      surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
                     )}
                   >
-                    Installation docs
-                    <ArrowRight className="h-2.5 w-2.5" />
-                  </a>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+                    Manual fallback
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-1.5 break-all font-mono text-[10px] leading-[1rem]",
+                      surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                    )}
+                  >
+                    {manualCommand}
+                  </p>
+                  {docsUrl ? (
+                    <a
+                      href={docsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={cn(
+                        "mt-2.5 inline-flex items-center gap-1 text-[10px] underline underline-offset-4",
+                        surfaceTheme === "light" ? "text-[#7f6554]" : "text-slate-300"
+                      )}
+                    >
+                      Installation docs
+                      <ArrowRight className="h-2.5 w-2.5" />
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           {canDismiss ? (
             <button
               type="button"
               onClick={onDismiss}
-              className={cn(
-                "text-[10px] uppercase tracking-[0.18em] transition-colors",
+                className={cn(
+                "text-[9px] uppercase tracking-[0.16em] transition-colors",
                 surfaceTheme === "light" ? "text-[#8f7664] hover:text-[#6f5949]" : "text-slate-500 hover:text-slate-300"
               )}
             >
@@ -340,7 +312,7 @@ export function OpenClawOnboarding({
             onClick={onPrimaryAction}
             disabled={runState === "running"}
             className={cn(
-              "h-10 min-w-[176px] rounded-full px-4 text-[13px]",
+              "h-9 min-w-[156px] rounded-full px-3.5 text-[12px]",
               surfaceTheme === "light"
                 ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
                 : "bg-white text-slate-950 hover:bg-white/92"
@@ -365,6 +337,7 @@ export function OpenClawOnboarding({
 }
 
 function buildSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboardingPhase | null) {
+  const directGatewayRun = snapshot.diagnostics.rpcOk && !snapshot.diagnostics.loaded;
   const cliComplete =
     snapshot.diagnostics.installed ||
     phase === "installing-gateway" ||
@@ -372,7 +345,11 @@ function buildSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboardingP
     phase === "verifying" ||
     phase === "ready";
   const gatewayComplete =
-    snapshot.diagnostics.loaded || phase === "starting-gateway" || phase === "verifying" || phase === "ready";
+    snapshot.diagnostics.loaded ||
+    directGatewayRun ||
+    phase === "starting-gateway" ||
+    phase === "verifying" ||
+    phase === "ready";
   const liveComplete = snapshot.diagnostics.rpcOk || phase === "ready";
 
   return [
@@ -389,7 +366,9 @@ function buildSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboardingP
       label: "Gateway service",
       description: snapshot.diagnostics.loaded
         ? "The local gateway service is already registered on this machine."
-        : "Register the local gateway service once so Mission Control can start it reliably.",
+        : directGatewayRun
+          ? "Gateway is live via direct run (service is not registered yet)."
+          : "Register the local gateway service once so Mission Control can start it reliably.",
       state: resolveStepState(
         gatewayComplete,
         !gatewayComplete && (phase === "installing-gateway" || (cliComplete && phase === "detecting"))
@@ -420,6 +399,28 @@ function resolveStepState(complete: boolean, current: boolean): StepState {
   }
 
   return "pending";
+}
+
+function resolvePhaseLabel(
+  phase: OpenClawOnboardingPhase | null,
+  snapshot: MissionControlSnapshot
+) {
+  if (snapshot.diagnostics.rpcOk) {
+    return "ready";
+  }
+
+  if (snapshot.diagnostics.loaded && !snapshot.diagnostics.rpcOk) {
+    if (phase === "verifying") {
+      return "connecting";
+    }
+    return "starting gateway";
+  }
+
+  if (!phase) {
+    return "waiting";
+  }
+
+  return phase.replace("-", " ");
 }
 
 function stepContainerClassName(state: StepState, surfaceTheme: SurfaceTheme) {
