@@ -739,6 +739,38 @@ export function MissionControlShell({
           />
         ) : null}
 
+        <div
+          className={cn(
+            "pointer-events-auto absolute bottom-3 right-4 z-30 text-[11px] tracking-[0.04em] lg:bottom-4 lg:right-6",
+            surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
+          )}
+        >
+          Built on{" "}
+          <a
+            href="https://openclaw.ai/"
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "transition-colors",
+              surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
+            )}
+          >
+            OpenClaw
+          </a>{" "}
+          by{" "}
+          <a
+            href="https://sapienx.app/"
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "transition-colors",
+              surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
+            )}
+          >
+            SapienX
+          </a>
+        </div>
+
         <Dialog
           open={isUpdateDialogOpen}
           onOpenChange={(open) => {
@@ -956,11 +988,11 @@ function CanvasTitlePill({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
     >
       <p
         className={cn(
-          "text-[10px] uppercase tracking-[0.3em]",
+          "text-[10px] tracking-[0.18em]",
           surfaceTheme === "light" ? "text-[#8a7261]" : "text-slate-500"
         )}
       >
-        Canvas
+        AgentOS
       </p>
       <span
         aria-hidden="true"
@@ -971,11 +1003,11 @@ function CanvasTitlePill({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
       />
       <h2
         className={cn(
-          "font-display text-[0.98rem]",
-          surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
+          "font-display text-[0.88rem]",
+          surfaceTheme === "light" ? "text-[#816958]/80" : "text-slate-400/75"
         )}
       >
-        Orchestration Surface
+        Mission Control
       </h2>
     </div>
   );
