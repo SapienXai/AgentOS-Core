@@ -78,9 +78,20 @@ type GatewayStatusPayload = {
 };
 
 type StatusPayload = {
+  version?: string;
+  updateChannel?: string;
   overview?: {
     version?: string;
     update?: string;
+  };
+  update?: {
+    root?: string;
+    installKind?: string;
+    packageManager?: string;
+    registry?: {
+      latestVersion?: string | null;
+      error?: string | null;
+    };
   };
   securityAudit?: {
     findings?: Array<{ severity?: string; title?: string; detail?: string }>;
@@ -517,19 +528,37 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
       status?.securityAudit?.findings
         ?.filter((entry) => entry.severity === "warn")
         .map((entry) => entry.title || entry.detail || "Security warning") ?? [];
+    const currentVersion = normalizeOptionalValue(presence[0]?.version || status?.overview?.version || status?.version);
+    const latestVersion = normalizeOptionalValue(status?.update?.registry?.latestVersion ?? undefined);
+    const updateError = normalizeUpdateError(status?.update?.registry?.error ?? undefined);
+    const updateAvailable =
+      currentVersion && latestVersion ? compareVersionStrings(latestVersion, currentVersion) > 0 : undefined;
+    const updateInfo = resolveUpdateInfo({
+      currentVersion,
+      latestVersion,
+      updateError,
+      legacyInfo: status?.overview?.update
+    });
 
     const diagnostics = {
       installed: true,
       loaded: Boolean(gatewayStatus?.service?.loaded),
       rpcOk: Boolean(gatewayStatus?.rpc?.ok),
       health: resolveDiagnosticHealth(gatewayStatus?.rpc?.ok, securityWarnings.length),
-      version: presence[0]?.version || status?.overview?.version,
+      version: currentVersion,
+      latestVersion,
+      updateAvailable,
+      updateError,
+      updateRoot: normalizeOptionalValue(status?.update?.root ?? undefined),
+      updateInstallKind: normalizeOptionalValue(status?.update?.installKind ?? undefined),
+      updatePackageManager: normalizeOptionalValue(status?.update?.packageManager ?? undefined),
+      workspaceRoot: resolveWorkspaceRoot(),
       dashboardUrl: `http://127.0.0.1:${gatewayStatus?.gateway?.port ?? 18789}/`,
       gatewayUrl: gatewayStatus?.gateway?.probeUrl || "ws://127.0.0.1:18789",
       bindMode: gatewayStatus?.gateway?.bindMode,
       port: gatewayStatus?.gateway?.port,
-      updateChannel: "stable",
-      updateInfo: status?.overview?.update,
+      updateChannel: status?.updateChannel || "stable",
+      updateInfo,
       serviceLabel: gatewayStatus?.service?.label,
       securityWarnings,
       issues: collectIssues({
@@ -3937,6 +3966,90 @@ function padNumber(value: number) {
 
 function normalizeWorkspaceRelativePath(targetPath: string) {
   return targetPath.split(path.sep).join("/");
+}
+
+function normalizeUpdateError(value: string | undefined) {
+  const normalized = normalizeOptionalValue(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.split(/\r?\n/, 1)[0]?.trim() || normalized;
+}
+
+function resolveUpdateInfo(params: {
+  currentVersion?: string;
+  latestVersion?: string;
+  updateError?: string;
+  legacyInfo?: string;
+}) {
+  const legacyInfo = normalizeOptionalValue(params.legacyInfo);
+
+  if (params.latestVersion && params.currentVersion) {
+    const comparison = compareVersionStrings(params.latestVersion, params.currentVersion);
+
+    if (comparison > 0) {
+      return `Update available: v${params.latestVersion} is ready. Current version: v${params.currentVersion}.`;
+    }
+
+    if (comparison === 0) {
+      return `OpenClaw is up to date on v${params.currentVersion}.`;
+    }
+
+    return `Running v${params.currentVersion}. Registry currently reports v${params.latestVersion}.`;
+  }
+
+  if (params.latestVersion) {
+    return `Latest available version: v${params.latestVersion}. Current version could not be determined.`;
+  }
+
+  if (legacyInfo) {
+    return legacyInfo;
+  }
+
+  if (params.updateError) {
+    return `Update registry check failed: ${params.updateError}`;
+  }
+
+  return undefined;
+}
+
+function compareVersionStrings(left: string, right: string) {
+  const leftParts = tokenizeVersion(left);
+  const rightParts = tokenizeVersion(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index] ?? 0;
+    const rightPart = rightParts[index] ?? 0;
+
+    if (typeof leftPart === "number" && typeof rightPart === "number") {
+      if (leftPart !== rightPart) {
+        return leftPart - rightPart;
+      }
+
+      continue;
+    }
+
+    const leftText = String(leftPart);
+    const rightText = String(rightPart);
+
+    if (leftText !== rightText) {
+      return leftText.localeCompare(rightText);
+    }
+  }
+
+  return 0;
+}
+
+function tokenizeVersion(value: string) {
+  return value
+    .trim()
+    .replace(/^v/i, "")
+    .split(/[^0-9a-zA-Z]+/)
+    .filter(Boolean)
+    .map((part) => (/^\d+$/.test(part) ? Number(part) : part.toLowerCase()));
 }
 
 function normalizeOptionalValue(value: string | undefined) {

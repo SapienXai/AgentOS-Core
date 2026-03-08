@@ -38,7 +38,7 @@ export function useMissionControlData(initialSnapshot: MissionControlSnapshot) {
     };
   }, []);
 
-  const refresh = async () => {
+  const refreshSnapshot = async () => {
     const response = await fetch("/api/snapshot", {
       cache: "no-store"
     });
@@ -46,13 +46,21 @@ export function useMissionControlData(initialSnapshot: MissionControlSnapshot) {
 
     startTransition(() => {
       setSnapshot(nextSnapshot);
+      setConnectionState("live");
     });
+
+    return nextSnapshot;
+  };
+
+  const refresh = async () => {
+    await refreshSnapshot();
   };
 
   return {
     snapshot,
     connectionState,
     refresh,
+    refreshSnapshot,
     setSnapshot
   };
 }

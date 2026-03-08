@@ -33,6 +33,13 @@ export interface GatewayDiagnostics {
   rpcOk: boolean;
   health: DiagnosticHealth;
   version?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  updateError?: string;
+  updateRoot?: string;
+  updateInstallKind?: string;
+  updatePackageManager?: string;
+  workspaceRoot: string;
   dashboardUrl: string;
   gatewayUrl: string;
   bindMode?: string;
@@ -239,6 +246,27 @@ export interface MissionResponse {
   }>;
   meta?: Record<string, unknown>;
 }
+
+export type OpenClawUpdateStreamEvent =
+  | {
+      type: "status";
+      phase: "starting" | "refreshing";
+      message: string;
+    }
+  | {
+      type: "log";
+      stream: "stdout" | "stderr";
+      text: string;
+    }
+  | {
+      type: "done";
+      ok: boolean;
+      message: string;
+      exitCode?: number | null;
+      stdout: string;
+      stderr: string;
+      snapshot?: MissionControlSnapshot;
+    };
 
 export type WorkspaceSourceMode = "empty" | "clone" | "existing";
 

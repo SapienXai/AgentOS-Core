@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
+export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
 
 interface CommandOptions {
   timeoutMs?: number;

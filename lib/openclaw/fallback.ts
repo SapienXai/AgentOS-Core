@@ -1,8 +1,12 @@
+import os from "node:os";
+import path from "node:path";
+
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
 export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
   const now = Date.now();
+  const workspaceRoot = path.join(os.homedir(), "Documents", "Shared", "projects");
 
   return {
     generatedAt: new Date(now).toISOString(),
@@ -12,6 +16,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       loaded: false,
       rpcOk: false,
       health: "offline",
+      workspaceRoot,
       dashboardUrl: "http://127.0.0.1:18789/",
       gatewayUrl: "ws://127.0.0.1:18789",
       securityWarnings: [],
