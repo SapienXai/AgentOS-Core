@@ -175,11 +175,13 @@ export function MissionCanvas({
   }, [snapshot.runtimes, pendingMission, hiddenRuntimeIds, onSelectNode]);
 
   useEffect(() => {
+    const creationTimeouts = creationTimeoutsRef.current;
+
     return () => {
-      creationTimeoutsRef.current.forEach((timeoutId) => {
+      creationTimeouts.forEach((timeoutId) => {
         clearTimeout(timeoutId);
       });
-      creationTimeoutsRef.current.clear();
+      creationTimeouts.clear();
     };
   }, []);
 

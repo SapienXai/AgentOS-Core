@@ -2881,7 +2881,8 @@ function finalizeTranscriptTurn(
     pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
   }
 ): TranscriptTurn {
-  const { pendingCreatedFiles: _pendingCreatedFiles, ...rest } = turn;
+  const { pendingCreatedFiles, ...rest } = turn;
+  void pendingCreatedFiles;
   const finalAssistant = [...turn.items]
     .reverse()
     .find((item) => item.role === "assistant" && (item.text.trim().length > 0 || item.errorMessage));

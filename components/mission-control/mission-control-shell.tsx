@@ -1094,7 +1094,6 @@ function CanvasTopBar({
             role="switch"
             aria-label={surfaceTheme === "light" ? "Switch to dark theme" : "Switch to light theme"}
             aria-checked={surfaceTheme === "light"}
-            aria-pressed={surfaceTheme === "light"}
             onClick={onToggleTheme}
             className={cn(
               "relative inline-flex h-7 w-14 items-center rounded-full border transition-colors",

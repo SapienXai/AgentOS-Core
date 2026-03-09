@@ -15,7 +15,7 @@ import {
   Trash2,
   Workflow
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import {
   Dialog,
@@ -218,14 +218,6 @@ export function WorkspacePlannerDialog({
     : 0;
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    void loadPlan();
-  }, [open]);
-
-  useEffect(() => {
     if (!plan || !messageListRef.current) {
       return;
     }
@@ -254,7 +246,24 @@ export function WorkspacePlannerDialog({
     [intakeStarted, isSending, sendProgressStep]
   );
 
-  const loadPlan = async () => {
+  const createFreshPlan = useCallback(async () => {
+    const response = await fetch("/api/planner", {
+      method: "POST"
+    });
+    const result = (await response.json()) as { plan?: WorkspacePlan; error?: string };
+
+    if (!response.ok || !result.plan) {
+      throw new Error(result.error || "Unable to create planner workspace.");
+    }
+
+    setPlan(result.plan);
+    setPlanId(result.plan.id);
+    setActiveSection("company");
+    setMessage("");
+    globalThis.localStorage?.setItem(plannerStorageKey, result.plan.id);
+  }, []);
+
+  const loadPlan = useCallback(async () => {
     setIsLoading(true);
 
     try {
@@ -282,24 +291,15 @@ export function WorkspacePlannerDialog({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [createFreshPlan]);
 
-  const createFreshPlan = async () => {
-    const response = await fetch("/api/planner", {
-      method: "POST"
-    });
-    const result = (await response.json()) as { plan?: WorkspacePlan; error?: string };
-
-    if (!response.ok || !result.plan) {
-      throw new Error(result.error || "Unable to create planner workspace.");
+  useEffect(() => {
+    if (!open) {
+      return;
     }
 
-    setPlan(result.plan);
-    setPlanId(result.plan.id);
-    setActiveSection("company");
-    setMessage("");
-    globalThis.localStorage?.setItem(plannerStorageKey, result.plan.id);
-  };
+    void loadPlan();
+  }, [loadPlan, open]);
 
   const updatePlan = (updater: (current: WorkspacePlan) => WorkspacePlan) => {
     setPlan((current) => {

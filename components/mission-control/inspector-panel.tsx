@@ -42,30 +42,37 @@ import type {
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
-export function InspectorPanel({
-  snapshot,
-  selectedNodeId,
-  lastMission,
-  collapsed,
-  onToggleCollapsed
-}: {
+type InspectorPanelProps = {
   snapshot: MissionControlSnapshot;
   selectedNodeId: string | null;
   lastMission: MissionResponse | null;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-}) {
-  const [activeTab, setActiveTab] = useState("overview");
-  const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
-  const [runtimeOutputLoading, setRuntimeOutputLoading] = useState(false);
-  const [runtimeOutputError, setRuntimeOutputError] = useState<string | null>(null);
+};
+
+export function InspectorPanel(props: InspectorPanelProps) {
+  return <InspectorPanelContent key={props.selectedNodeId ?? "overview"} {...props} />;
+}
+
+function InspectorPanelContent({
+  snapshot,
+  selectedNodeId,
+  lastMission,
+  collapsed,
+  onToggleCollapsed
+}: InspectorPanelProps) {
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === selectedNodeId);
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selectedNodeId);
   const selectedRuntime = snapshot.runtimes.find((runtime) => runtime.id === selectedNodeId);
   const selectedModel = snapshot.models.find((model) => model.id === selectedNodeId);
   const selectedEntity = selectedWorkspace || selectedAgent || selectedRuntime || selectedModel || null;
   const selectedRuntimeId = selectedRuntime?.id ?? null;
+  const [activeTab, setActiveTab] = useState("overview");
+  const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
+  const [runtimeOutputLoading, setRuntimeOutputLoading] = useState(Boolean(selectedRuntimeId));
+  const [runtimeOutputError, setRuntimeOutputError] = useState<string | null>(null);
   const showOutputTab = Boolean(selectedRuntime);
+  const visibleActiveTab = activeTab === "output" && !showOutputTab ? "overview" : activeTab;
   const selectedLabel =
     selectedWorkspace?.name ||
     selectedAgent?.name ||
@@ -92,26 +99,11 @@ export function InspectorPanel({
   );
 
   useEffect(() => {
-    setActiveTab("overview");
-  }, [selectedNodeId]);
-
-  useEffect(() => {
-    if (activeTab === "output" && !showOutputTab) {
-      setActiveTab("overview");
-    }
-  }, [activeTab, showOutputTab]);
-
-  useEffect(() => {
     if (!selectedRuntimeId) {
-      setRuntimeOutput(null);
-      setRuntimeOutputLoading(false);
-      setRuntimeOutputError(null);
       return;
     }
 
     const controller = new AbortController();
-    setRuntimeOutputLoading(true);
-    setRuntimeOutputError(null);
 
     fetch(`/api/runtimes/${encodeURIComponent(selectedRuntimeId)}`, { signal: controller.signal })
       .then(async (response) => {
@@ -172,7 +164,7 @@ export function InspectorPanel({
               key={item.id}
               icon={item.icon}
               label={item.label}
-              active={activeTab === item.id}
+              active={visibleActiveTab === item.id}
               disabled={!item.enabled}
               onClick={() => {
                 if (!item.enabled) {
@@ -242,7 +234,7 @@ export function InspectorPanel({
                     <InspectorTabButton
                       key={item.id}
                       label={item.label}
-                      active={activeTab === item.id}
+                      active={visibleActiveTab === item.id}
                       onClick={() => setActiveTab(item.id)}
                     />
                   ))}
@@ -252,13 +244,13 @@ export function InspectorPanel({
             <div className="flex-1 p-4">
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={`${selectedNodeId || "overview"}:${activeTab}`}
+                  key={`${selectedNodeId || "overview"}:${visibleActiveTab}`}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   className="space-y-3.5"
                 >
-                  {activeTab === "overview" ? (
+                  {visibleActiveTab === "overview" ? (
                     <>
                       {selectedWorkspace ? <WorkspaceContent snapshot={snapshot} workspaceId={selectedWorkspace.id} /> : null}
                       {selectedAgent ? <AgentContent snapshot={snapshot} agentId={selectedAgent.id} /> : null}
@@ -276,7 +268,7 @@ export function InspectorPanel({
                     </>
                   ) : null}
 
-                  {activeTab === "output" && selectedRuntime ? (
+                  {visibleActiveTab === "output" && selectedRuntime ? (
                     <RuntimeOutputContent
                       runtime={selectedRuntime}
                       runtimeOutput={runtimeOutput}
@@ -285,7 +277,7 @@ export function InspectorPanel({
                     />
                   ) : null}
 
-                  {activeTab === "raw" ? (
+                  {visibleActiveTab === "raw" ? (
                     <pre className="overflow-x-auto rounded-[18px] border border-white/[0.08] bg-slate-950/[0.72] p-3 text-[11px] leading-5 text-slate-300">
                       {JSON.stringify(
                         selectedRuntime && runtimeOutput

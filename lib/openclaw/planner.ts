@@ -34,11 +34,9 @@ import type {
   PlannerExperienceMode,
   PlannerAutomationSpec,
   PlannerChannelSpec,
-  PlannerContextSourceKind,
   PlannerContextSource,
   PlannerHookSpec,
   PlannerPersistentAgentSpec,
-  PlannerRuntimeState,
   PlannerSandboxSpec,
   PlannerWorkflowSpec,
   WorkspaceTemplate,
@@ -549,7 +547,7 @@ async function ensurePlannerRuntime(plan: WorkspacePlan) {
     });
   }
 
-  let nextPlan = structuredClone(plan);
+  const nextPlan = structuredClone(plan);
 
   try {
     let snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
