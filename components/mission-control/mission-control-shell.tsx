@@ -747,11 +747,17 @@ export function MissionControlShell({
         />
       </div>
 
-      <div className="relative z-20 flex min-h-screen flex-col gap-4 px-4 pb-4 pt-5 pointer-events-none lg:h-screen lg:block lg:px-0 lg:pb-0 lg:pt-0">
+      <div className="relative z-20 min-h-screen pointer-events-none lg:h-screen">
+        <div className="pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2 lg:hidden">
+          <CanvasTitlePill surfaceTheme={surfaceTheme} />
+        </div>
+
         <div
           className={cn(
-            "order-1 pointer-events-auto lg:absolute lg:left-6 lg:z-30",
-            isSidebarOpen ? "lg:bottom-[244px] lg:top-6 lg:w-[394px]" : "lg:bottom-[244px] lg:top-6 lg:w-[78px]"
+            "pointer-events-auto absolute left-4 top-4 z-30",
+            isSidebarOpen
+              ? "bottom-[calc(env(safe-area-inset-bottom)+124px)] w-[calc(100vw-112px)] max-w-[300px] lg:bottom-[244px] lg:top-6 lg:w-[394px] lg:max-w-none"
+              : "w-[78px] lg:bottom-[244px] lg:top-6"
           )}
         >
           <MissionSidebar
@@ -769,25 +775,12 @@ export function MissionControlShell({
           />
         </div>
 
-        <div className="order-2 min-h-[660px] lg:hidden">
-          <div
-            className={cn(
-              "mission-canvas-frame relative h-full overflow-hidden rounded-[32px] border",
-              surfaceTheme === "light"
-                ? "border-[#d9c9bc]/80 bg-[rgba(255,250,245,0.12)] shadow-[0_24px_60px_rgba(161,125,101,0.12)]"
-                : "border-white/[0.05] bg-[rgba(4,10,20,0.12)]"
-            )}
-          >
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex px-2 pt-2">
-              <CanvasTitlePill surfaceTheme={surfaceTheme} />
-            </div>
-          </div>
-        </div>
-
         <div
           className={cn(
-            "order-3 min-h-0 pointer-events-auto lg:absolute lg:right-6 lg:z-30",
-            isInspectorOpen ? "lg:bottom-[244px] lg:top-6 lg:w-[394px]" : "lg:bottom-[244px] lg:top-6 lg:w-[78px]"
+            "pointer-events-auto absolute right-4 top-4 z-30",
+            isInspectorOpen
+              ? "bottom-[calc(env(safe-area-inset-bottom)+124px)] w-[calc(100vw-112px)] max-w-[300px] lg:bottom-[244px] lg:top-6 lg:w-[394px] lg:max-w-none"
+              : "w-[78px] lg:bottom-[244px] lg:top-6"
           )}
         >
           <InspectorPanel
@@ -799,7 +792,7 @@ export function MissionControlShell({
           />
         </div>
 
-        <div className="order-4 pointer-events-auto lg:absolute lg:bottom-6 lg:left-1/2 lg:z-40 lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">
+        <div className="pointer-events-auto absolute bottom-[calc(env(safe-area-inset-bottom)+12px)] left-4 right-4 z-40 lg:bottom-6 lg:left-1/2 lg:right-auto lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">
           <CommandBar
             snapshot={snapshot}
             activeWorkspaceId={activeWorkspaceId}

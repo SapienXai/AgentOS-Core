@@ -76,6 +76,7 @@ export function MissionCanvas({
   onSelectNode: (nodeId: string) => void;
   className?: string;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
   const pendingMissionRef = useRef<PendingMissionCard | null>(null);
   const handledPendingMissionIdsRef = useRef<Set<string>>(new Set());
@@ -212,38 +213,73 @@ export function MissionCanvas({
     return () => clearTimeout(timeoutId);
   }, [focusRuntimeId, nodes]);
 
-  return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      onInit={(instance) => {
-        reactFlowRef.current = instance;
-      }}
-      elevateNodesOnSelect={false}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onNodeClick={(_, node) => {
-        if (node.id.startsWith("pending-runtime:")) {
-          return;
-        }
+  useEffect(() => {
+    const container = containerRef.current;
 
-        onSelectNode(node.id);
-      }}
-      fitView
-      fitViewOptions={{ padding: 0.14, duration: 700, maxZoom: 0.9 }}
-      minZoom={0.42}
-      maxZoom={1.2}
-      defaultEdgeOptions={{
-        type: "simplebezier",
-        style: {
-          stroke: "rgba(148, 163, 184, 0.34)",
-          strokeWidth: 1.15
-        }
-      }}
-      proOptions={{ hideAttribution: true }}
-      className={cn("h-full w-full rounded-[30px]", className)}
-    />
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    let fitTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const observer = new ResizeObserver(() => {
+      if (!reactFlowRef.current || nodes.length === 0) {
+        return;
+      }
+
+      if (fitTimeoutId) {
+        clearTimeout(fitTimeoutId);
+      }
+
+      fitTimeoutId = setTimeout(() => {
+        reactFlowRef.current?.fitView({ padding: 0.14, duration: 260, maxZoom: 0.9 });
+      }, 90);
+    });
+
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+
+      if (fitTimeoutId) {
+        clearTimeout(fitTimeoutId);
+      }
+    };
+  }, [nodes.length]);
+
+  return (
+    <div ref={containerRef} className={cn("h-full w-full", className)}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onInit={(instance) => {
+          reactFlowRef.current = instance;
+        }}
+        elevateNodesOnSelect={false}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={(_, node) => {
+          if (node.id.startsWith("pending-runtime:")) {
+            return;
+          }
+
+          onSelectNode(node.id);
+        }}
+        fitView
+        fitViewOptions={{ padding: 0.14, duration: 700, maxZoom: 0.9 }}
+        minZoom={0.42}
+        maxZoom={1.2}
+        defaultEdgeOptions={{
+          type: "simplebezier",
+          style: {
+            stroke: "rgba(148, 163, 184, 0.34)",
+            strokeWidth: 1.15
+          }
+        }}
+        proOptions={{ hideAttribution: true }}
+        className="h-full w-full rounded-[inherit]"
+      />
+    </div>
   );
 }
 
