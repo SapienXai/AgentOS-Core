@@ -364,6 +364,287 @@ export interface WorkspaceCreateResult {
   kickoffError?: string;
 }
 
+export type WorkspacePlanStatus =
+  | "draft"
+  | "review"
+  | "ready"
+  | "deploying"
+  | "deployed"
+  | "blocked";
+
+export type WorkspacePlanStage =
+  | "intake"
+  | "context-harvest"
+  | "team-synthesis"
+  | "pressure-test"
+  | "decision-lock"
+  | "ready"
+  | "deploying"
+  | "deployed";
+
+export type PlannerAdvisorId =
+  | "founder"
+  | "product"
+  | "architect"
+  | "ops"
+  | "growth"
+  | "reviewer";
+
+export type PlannerMessageRole = "assistant" | "user" | "system";
+
+export type PlannerCompanyType =
+  | "saas"
+  | "agency"
+  | "research-lab"
+  | "content-brand"
+  | "internal-ops"
+  | "custom";
+
+export type PlannerChannelType = "internal" | "slack" | "telegram" | "discord" | "googlechat";
+
+export type PlannerWorkflowTrigger = "manual" | "event" | "cron" | "launch";
+
+export type PlannerAutomationScheduleKind = "every" | "cron";
+
+export type PlannerSandboxMode = "default" | "strict" | "extended";
+
+export interface PlannerMessage {
+  id: string;
+  role: PlannerMessageRole;
+  author: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface PlannerAdvisorNote {
+  id: string;
+  advisorId: PlannerAdvisorId;
+  advisorName: string;
+  summary: string;
+  recommendations: string[];
+  concerns: string[];
+  createdAt: string;
+}
+
+export type PlannerContextSourceKind = "prompt" | "website" | "repo" | "folder";
+
+export type PlannerContextSourceStatus = "ready" | "error";
+
+export type PlannerExperienceMode = "guided" | "advanced";
+
+export type PlannerDecisionStatus = "inferred" | "confirmed" | "needs-confirmation";
+
+export type PlannerRuntimeMode = "agent" | "fallback";
+
+export type PlannerRuntimeStatus = "pending" | "ready" | "error";
+
+export interface PlannerContextSource {
+  id: string;
+  kind: PlannerContextSourceKind;
+  label: string;
+  summary: string;
+  details: string[];
+  status: PlannerContextSourceStatus;
+  createdAt: string;
+  url?: string;
+  error?: string;
+}
+
+export interface PlannerInference {
+  id: string;
+  section: "company" | "product" | "workspace" | "team" | "operations" | "deploy";
+  label: string;
+  value: string;
+  confidence: number;
+  status: PlannerDecisionStatus;
+  rationale: string;
+  sourceLabels: string[];
+}
+
+export interface PlannerRuntimeState {
+  mode: PlannerRuntimeMode;
+  status: PlannerRuntimeStatus;
+  workspaceId?: string;
+  workspacePath?: string;
+  architectAgentId?: string;
+  architectSessionId: string;
+  advisorAgentIds: Partial<Record<PlannerAdvisorId, string>>;
+  advisorSessionIds: Partial<Record<PlannerAdvisorId, string>>;
+  lastArchitectRunId?: string;
+  lastAdvisorRunIds: string[];
+  lastError?: string;
+}
+
+export interface PlannerIntakeState {
+  started: boolean;
+  initialPrompt: string;
+  latestPrompt: string;
+  sources: PlannerContextSource[];
+  confirmations: string[];
+  mode: PlannerExperienceMode;
+  reviewRequested: boolean;
+  turnCount: number;
+  inferences: PlannerInference[];
+  suggestedReplies: string[];
+}
+
+export interface PlannerPersistentAgentSpec {
+  id: string;
+  role: string;
+  name: string;
+  purpose: string;
+  enabled: boolean;
+  isPrimary: boolean;
+  emoji?: string;
+  theme?: string;
+  skillId?: string;
+  modelId?: string;
+  policy: AgentPolicy;
+  heartbeat: AgentHeartbeatInput;
+  responsibilities: string[];
+  outputs: string[];
+}
+
+export interface PlannerWorkflowSpec {
+  id: string;
+  name: string;
+  goal: string;
+  trigger: PlannerWorkflowTrigger;
+  ownerAgentId?: string;
+  collaboratorAgentIds: string[];
+  successDefinition: string;
+  outputs: string[];
+  channelIds: string[];
+  enabled: boolean;
+}
+
+export interface PlannerChannelCredentialField {
+  key: string;
+  label: string;
+  value: string;
+  secret: boolean;
+  placeholder?: string;
+}
+
+export interface PlannerChannelSpec {
+  id: string;
+  type: PlannerChannelType;
+  name: string;
+  purpose: string;
+  target?: string;
+  enabled: boolean;
+  announce: boolean;
+  requiresCredentials: boolean;
+  credentials: PlannerChannelCredentialField[];
+}
+
+export interface PlannerAutomationSpec {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  scheduleKind: PlannerAutomationScheduleKind;
+  scheduleValue: string;
+  agentId?: string;
+  mission: string;
+  thinking: NonNullable<MissionSubmission["thinking"]>;
+  announce: boolean;
+  channelId?: string;
+}
+
+export interface PlannerHookSpec {
+  id: string;
+  name: string;
+  source: string;
+  enabled: boolean;
+  notes: string;
+}
+
+export interface PlannerSandboxSpec {
+  workspaceOnly: boolean;
+  mode: PlannerSandboxMode;
+  notes: string[];
+}
+
+export interface WorkspacePlan {
+  id: string;
+  status: WorkspacePlanStatus;
+  stage: WorkspacePlanStage;
+  createdAt: string;
+  updatedAt: string;
+  autopilot: boolean;
+  readinessScore: number;
+  architectSummary: string;
+  runtime: PlannerRuntimeState;
+  intake: PlannerIntakeState;
+  company: {
+    name: string;
+    type: PlannerCompanyType;
+    mission: string;
+    targetCustomer: string;
+    constraints: string[];
+    successSignals: string[];
+  };
+  product: {
+    offer: string;
+    scopeV1: string[];
+    nonGoals: string[];
+    revenueModel: string;
+    launchPriority: string[];
+  };
+  workspace: {
+    name: string;
+    directory?: string;
+    sourceMode: WorkspaceSourceMode;
+    repoUrl?: string;
+    existingPath?: string;
+    template: WorkspaceTemplate;
+    modelProfile: WorkspaceModelProfile;
+    modelId?: string;
+    stackDecisions: string[];
+    docs: string[];
+    rules: WorkspaceCreateRules;
+  };
+  team: {
+    persistentAgents: PlannerPersistentAgentSpec[];
+    allowEphemeralSubagents: boolean;
+    maxParallelRuns: number;
+    escalationRules: string[];
+  };
+  operations: {
+    workflows: PlannerWorkflowSpec[];
+    channels: PlannerChannelSpec[];
+    automations: PlannerAutomationSpec[];
+    hooks: PlannerHookSpec[];
+    sandbox: PlannerSandboxSpec;
+  };
+  deploy: {
+    blockers: string[];
+    warnings: string[];
+    firstMissions: string[];
+    lastDeployedAt?: string;
+    workspaceId?: string;
+    workspacePath?: string;
+    primaryAgentId?: string;
+    createdAgentIds: string[];
+    provisionedChannels: string[];
+    provisionedAutomations: string[];
+    kickoffRunIds: string[];
+  };
+  conversation: PlannerMessage[];
+  advisorNotes: PlannerAdvisorNote[];
+}
+
+export interface WorkspacePlanDeployResult {
+  plan: WorkspacePlan;
+  workspaceId: string;
+  workspacePath: string;
+  primaryAgentId: string;
+  agentIds: string[];
+  kickoffRunIds: string[];
+  warnings: string[];
+}
+
 export interface AgentCreateInput {
   id: string;
   workspaceId: string;

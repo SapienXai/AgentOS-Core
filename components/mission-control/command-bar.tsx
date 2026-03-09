@@ -3,17 +3,16 @@
 import {
   ChevronDown,
   LoaderCircle,
-  Plus,
   RefreshCcw,
   SendHorizontal,
   SlidersHorizontal,
+  Sparkles,
   X
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
-import { WorkspaceCreateDialog } from "@/components/mission-control/workspace-create-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
@@ -51,8 +50,9 @@ type RecentPrompt = {
 type InlineSuggestion = {
   id: string;
   label: string;
-  mission: string;
+  mission?: string;
   thinking?: ThinkingLevel;
+  action?: "apply-mission" | "open-workspace-planner";
 };
 
 const composerDraftStoragePrefix = "mission-control-composer-draft";
@@ -65,7 +65,7 @@ export function CommandBar({
   selectedNodeId,
   composeIntent,
   onRefresh,
-  onWorkspaceCreated,
+  onOpenWorkspacePlanner,
   onMissionResponse,
   onMissionDispatchStart,
   onMissionDispatchComplete
@@ -75,7 +75,7 @@ export function CommandBar({
   selectedNodeId: string | null;
   composeIntent: ComposeIntent | null;
   onRefresh: () => Promise<void>;
-  onWorkspaceCreated: (workspaceId: string) => void;
+  onOpenWorkspacePlanner: () => void;
   onMissionResponse: (result: MissionResponse) => void;
   onMissionDispatchStart: (payload: {
     id: string;
@@ -121,7 +121,7 @@ export function CommandBar({
   const dynamicPlaceholder = selectedAgent
     ? `Compose for ${selectedAgent.name}...`
     : "Compose a mission...";
-  const inlineSuggestions = buildInlineSuggestions(snapshot, selectedAgent, recentPrompts);
+  const inlineSuggestions = buildInlineSuggestions(selectedAgent, recentPrompts);
   const showSuggestions = inlineSuggestions.length > 0;
   const isDesktopCollapsed =
     isDesktopLayout &&
@@ -537,16 +537,9 @@ export function CommandBar({
                     )}
                   </IconButton>
 
-                  <WorkspaceCreateDialog
-                    snapshot={snapshot}
-                    onRefresh={onRefresh}
-                    onWorkspaceCreated={onWorkspaceCreated}
-                    trigger={
-                      <IconButton label="Create workspace">
-                        <Plus className="h-3.5 w-3.5" />
-                      </IconButton>
-                    }
-                  />
+                  <IconButton label="Plan a workspace" onClick={onOpenWorkspacePlanner}>
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </IconButton>
 
                   <IconButton
                     label="Composer settings"
@@ -602,11 +595,20 @@ export function CommandBar({
                         <SuggestionChip
                           key={suggestion.id}
                           label={suggestion.label}
-                          onClick={() =>
+                          onClick={() => {
+                            if (suggestion.action === "open-workspace-planner") {
+                              onOpenWorkspacePlanner();
+                              return;
+                            }
+
+                            if (!suggestion.mission) {
+                              return;
+                            }
+
                             applyMissionSnippet(suggestion.mission, {
                               thinking: suggestion.thinking
-                            })
-                          }
+                            });
+                          }}
                         />
                       ))}
                     </motion.div>
@@ -829,20 +831,16 @@ function resolvePreferredAgentId(
 }
 
 function buildInlineSuggestions(
-  snapshot: MissionControlSnapshot,
   selectedAgent: MissionControlSnapshot["agents"][number] | null,
   recentPrompts: RecentPrompt[]
 ) {
   const suggestions: InlineSuggestion[] = [];
-  const preset = snapshot.missionPresets[0];
 
-  if (preset) {
-    suggestions.push({
-      id: "preset-primary",
-      label: "Plan next step",
-      mission: preset
-    });
-  }
+  suggestions.push({
+    id: "workspace-planner",
+    label: "Plan a workspace",
+    action: "open-workspace-planner"
+  });
 
   if (selectedAgent) {
     suggestions.push({
@@ -872,7 +870,7 @@ function buildInlineSuggestions(
 
   return suggestions
     .filter((item) => {
-      const key = item.mission.trim().toLowerCase();
+      const key = `${item.action || "mission"}:${item.mission?.trim().toLowerCase() || item.label.toLowerCase()}`;
       if (seen.has(key)) {
         return false;
       }

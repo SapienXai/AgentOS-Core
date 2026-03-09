@@ -8,6 +8,7 @@ import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
+import { WorkspacePlannerDialog } from "@/components/mission-control/workspace-planner-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -94,6 +95,7 @@ export function MissionControlShell({
   const [showOnboardingReadyState, setShowOnboardingReadyState] = useState(false);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
+  const [isWorkspacePlannerOpen, setIsWorkspacePlannerOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
@@ -706,10 +708,7 @@ export function MissionControlShell({
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
             onRefresh={refresh}
-            onWorkspaceCreated={(workspaceId) => {
-              setActiveWorkspaceId(workspaceId);
-              setSelectedNodeId(workspaceId);
-            }}
+            onOpenWorkspacePlanner={() => setIsWorkspacePlannerOpen(true)}
             onMissionResponse={setLastMission}
             onMissionDispatchStart={setPendingMission}
             onMissionDispatchComplete={(status) => {
@@ -738,6 +737,17 @@ export function MissionControlShell({
             canDismiss={!showOnboardingReadyState && onboardingRunState !== "running"}
           />
         ) : null}
+
+        <WorkspacePlannerDialog
+          open={isWorkspacePlannerOpen}
+          onOpenChange={setIsWorkspacePlannerOpen}
+          snapshot={snapshot}
+          onRefresh={refresh}
+          onWorkspaceCreated={(workspaceId) => {
+            setActiveWorkspaceId(workspaceId);
+            setSelectedNodeId(workspaceId);
+          }}
+        />
 
         <div
           className={cn(

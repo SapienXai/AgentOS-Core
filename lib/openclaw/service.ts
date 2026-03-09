@@ -229,6 +229,8 @@ type WorkspaceProjectManifest = {
   template: WorkspaceTemplate | null;
   sourceMode: WorkspaceSourceMode | null;
   agentTemplate: string | null;
+  hidden: boolean;
+  systemTag: string | null;
   agents: WorkspaceProjectManifestAgent[];
 };
 type SessionTranscriptEntry = {
@@ -297,7 +299,7 @@ type TranscriptTurn = {
 let snapshotCache: { snapshot: MissionControlSnapshot; expiresAt: number } | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 
-export async function getMissionControlSnapshot(options: { force?: boolean } = {}) {
+export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
   if (!options.force && snapshotCache && snapshotCache.expiresAt > Date.now()) {
     return snapshotCache.snapshot;
   }
@@ -506,8 +508,53 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
       })
     );
 
+    const hiddenWorkspaceIds = new Set(
+      workspaces
+        .filter((workspace) => manifestByWorkspace.get(workspace.path)?.hidden)
+        .map((workspace) => workspace.id)
+    );
+    const visibleAgents = options.includeHidden
+      ? agents
+      : agents.filter((agent) => !hiddenWorkspaceIds.has(agent.workspaceId));
+    const hiddenAgentIds = new Set(
+      agents
+        .filter((agent) => hiddenWorkspaceIds.has(agent.workspaceId))
+        .map((agent) => agent.id)
+    );
+    const visibleRuntimes = options.includeHidden
+      ? runtimes
+      : runtimes.filter(
+          (runtime) =>
+            !(runtime.agentId && hiddenAgentIds.has(runtime.agentId)) &&
+            !(runtime.workspaceId && hiddenWorkspaceIds.has(runtime.workspaceId))
+        );
+    const hiddenRuntimeIds = new Set(
+      runtimes
+        .filter(
+          (runtime) =>
+            (runtime.agentId && hiddenAgentIds.has(runtime.agentId)) ||
+            (runtime.workspaceId && hiddenWorkspaceIds.has(runtime.workspaceId))
+        )
+        .map((runtime) => runtime.id)
+    );
+    const hiddenNodeIds = new Set<string>([
+      ...hiddenWorkspaceIds,
+      ...hiddenAgentIds,
+      ...hiddenRuntimeIds
+    ]);
+    const visibleRelationships = options.includeHidden
+      ? relationships
+      : relationships.filter(
+          (relationship) =>
+            !hiddenNodeIds.has(relationship.sourceId) &&
+            !hiddenNodeIds.has(relationship.targetId)
+        );
+    const visibleWorkspaces = options.includeHidden
+      ? workspaces
+      : workspaces.filter((workspace) => !hiddenWorkspaceIds.has(workspace.id));
+
     const modelUsage = new Map<string, number>();
-    for (const agent of agents) {
+    for (const agent of visibleAgents) {
       modelUsage.set(agent.modelId, (modelUsage.get(agent.modelId) ?? 0) + 1);
     }
 
@@ -585,11 +632,11 @@ export async function getMissionControlSnapshot(options: { force?: boolean } = {
         text: entry.text,
         ts: entry.ts
       })) as PresenceRecord[],
-      workspaces,
-      agents,
+      workspaces: visibleWorkspaces,
+      agents: visibleAgents,
       models: mappedModels,
-      runtimes,
-      relationships,
+      runtimes: visibleRuntimes,
+      relationships: visibleRelationships,
       missionPresets: [
         "Audit the selected workspace and generate a concrete first task batch.",
         "Plan a multi-agent delivery mission for the current product goal.",
@@ -615,7 +662,7 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
     throw new Error("Mission text is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const agentId = input.agentId || resolveAgentForMission(snapshot, input.workspaceId);
 
   if (!agentId) {
@@ -713,7 +760,7 @@ async function mapSessionToRuntimes(
 }
 
 export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutputRecord> {
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
 
   if (!runtime) {
@@ -822,7 +869,7 @@ export async function createAgent(input: AgentCreateInput) {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   assertAgentIdAvailable(snapshot, agentId, input.workspaceId);
   const workspace = snapshot.workspaces.find((entry) => entry.id === input.workspaceId);
 
@@ -912,7 +959,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const agent = snapshot.agents.find((entry) => entry.id === agentId);
 
   if (!agent) {
@@ -993,7 +1040,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const agent = snapshot.agents.find((entry) => entry.id === agentId);
 
   if (!agent) {
@@ -1043,7 +1090,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
 export async function createWorkspaceProject(input: WorkspaceCreateInput): Promise<WorkspaceCreateResult> {
   const normalized = resolveWorkspaceBootstrapInput(input);
   const targetDir = resolveWorkspaceCreationTargetDir(normalized);
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const enabledAgents = normalized.agents.filter((agent) => agent.enabled);
 
   if (enabledAgents.length === 0) {
@@ -1284,6 +1331,7 @@ async function scaffoldWorkspaceContents(
   const createdAt = new Date().toISOString();
   const toolExamples = await detectWorkspaceToolExamples(workspacePath);
 
+  await ensureWorkspaceGitignore(workspacePath);
   await mkdir(path.join(workspacePath, "skills"), { recursive: true });
   await mkdir(path.join(workspacePath, ".openclaw", "project-shell", "runs"), { recursive: true });
   await mkdir(path.join(workspacePath, ".openclaw", "project-shell", "tasks"), { recursive: true });
@@ -1427,6 +1475,36 @@ async function scaffoldWorkspaceContents(
       renderSkillMarkdown(skillId, agent.role)
     );
   }
+}
+
+const workspaceGitignoreManagedEntries = [
+  ".openclaw/agents/",
+  ".openclaw/project-shell/events.jsonl",
+  ".openclaw/project-shell/runs/",
+  ".openclaw/project-shell/tasks/"
+] as const;
+
+async function ensureWorkspaceGitignore(workspacePath: string) {
+  const gitignorePath = path.join(workspacePath, ".gitignore");
+  let existing = "";
+
+  try {
+    existing = await readFile(gitignorePath, "utf8");
+  } catch {
+    existing = "";
+  }
+
+  const missingEntries = workspaceGitignoreManagedEntries.filter((entry) => !existing.includes(entry));
+
+  if (missingEntries.length === 0) {
+    return;
+  }
+
+  const managedBlock = ["# OpenClaw local runtime state", ...missingEntries].join("\n");
+  const nextContents =
+    existing.trim().length > 0 ? `${existing.trimEnd()}\n\n${managedBlock}\n` : `${managedBlock}\n`;
+
+  await writeTextFileEnsured(gitignorePath, nextContents);
 }
 
 async function createBootstrappedWorkspaceAgent(params: {
@@ -3215,6 +3293,8 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
       template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
       sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null,
       agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null,
+      hidden: parsed.hidden === true,
+      systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
       agents
     };
   } catch {
@@ -3222,6 +3302,8 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
       template: null,
       sourceMode: null,
       agentTemplate: null,
+      hidden: false,
+      systemTag: null,
       agents: []
     };
   }

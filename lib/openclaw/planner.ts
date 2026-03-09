@@ -1,0 +1,2133 @@
+import "server-only";
+
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
+import {
+  applyPlannerInput,
+  applyPlannerTemplate,
+  createPlannerAgentSpec,
+  createPlannerAutomationSpec,
+  createArchitectReply,
+  createPlannerChannelSpec,
+  createPlannerContextSource,
+  createPlannerHookSpec,
+  createInitialWorkspacePlan,
+  createPlannerMessage,
+  createPlannerRuntimeState,
+  createPlannerSandboxSpec,
+  createPlannerWorkflowSpec,
+  enrichWorkspacePlan,
+  synthesizePlannerAdvisors
+} from "@/lib/openclaw/planner-core";
+import {
+  createAgent,
+  createWorkspaceProject,
+  getMissionControlSnapshot,
+  submitMission
+} from "@/lib/openclaw/service";
+import type {
+  PlannerAdvisorId,
+  PlannerAdvisorNote,
+  PlannerExperienceMode,
+  PlannerAutomationSpec,
+  PlannerChannelSpec,
+  PlannerContextSourceKind,
+  PlannerContextSource,
+  PlannerHookSpec,
+  PlannerPersistentAgentSpec,
+  PlannerRuntimeState,
+  PlannerSandboxSpec,
+  PlannerWorkflowSpec,
+  WorkspaceTemplate,
+  WorkspaceAgentBlueprintInput,
+  WorkspaceCreateInput,
+  WorkspacePlan,
+  WorkspacePlanDeployResult
+} from "@/lib/openclaw/types";
+
+const plannerRootPath = path.join(process.cwd(), ".mission-control", "planner");
+const plansRootPath = path.join(plannerRootPath, "plans");
+const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspace");
+const WEBSITE_INSPECTION_TIMEOUT_MS = 3500;
+const PLANNER_RUNTIME_NAME = "Mission Control Planner Runtime";
+const PLANNER_RUNTIME_SYSTEM_TAG = "mission-control-planner";
+
+const plannerRuntimeAgentBlueprints: Array<WorkspaceAgentBlueprintInput> = [
+  {
+    id: "architect",
+    role: "Workspace Architect",
+    name: "Workspace Architect",
+    enabled: true,
+    isPrimary: true,
+    emoji: "🤖",
+    theme: "cyan",
+    skillId: "planner-architect",
+    policy: resolveAgentPolicy("worker", {
+      fileAccess: "workspace-only",
+      networkAccess: "enabled"
+    }),
+    heartbeat: { enabled: false }
+  },
+  {
+    id: "founder",
+    role: "Founder",
+    name: "Founder",
+    enabled: true,
+    emoji: "🏗️",
+    theme: "amber",
+    skillId: "planner-founder",
+    policy: resolveAgentPolicy("worker", {
+      fileAccess: "workspace-only",
+      networkAccess: "enabled"
+    }),
+    heartbeat: { enabled: false }
+  },
+  {
+    id: "product",
+    role: "Product Lead",
+    name: "Product Lead",
+    enabled: true,
+    emoji: "📐",
+    theme: "emerald",
+    skillId: "planner-product",
+    policy: resolveAgentPolicy("worker", {
+      fileAccess: "workspace-only",
+      networkAccess: "enabled"
+    }),
+    heartbeat: { enabled: false }
+  },
+  {
+    id: "ops",
+    role: "Operations",
+    name: "Operations",
+    enabled: true,
+    emoji: "⚙️",
+    theme: "blue",
+    skillId: "planner-ops",
+    policy: resolveAgentPolicy("worker", {
+      fileAccess: "workspace-only",
+      networkAccess: "enabled"
+    }),
+    heartbeat: { enabled: false }
+  },
+  {
+    id: "growth",
+    role: "Growth",
+    name: "Growth",
+    enabled: true,
+    emoji: "📣",
+    theme: "violet",
+    skillId: "planner-growth",
+    policy: resolveAgentPolicy("worker", {
+      fileAccess: "workspace-only",
+      networkAccess: "enabled"
+    }),
+    heartbeat: { enabled: false }
+  },
+  {
+    id: "reviewer",
+    role: "Reviewer",
+    name: "Reviewer",
+    enabled: true,
+    emoji: "🔍",
+    theme: "rose",
+    skillId: "planner-reviewer",
+    policy: resolveAgentPolicy("worker", {
+      fileAccess: "workspace-only",
+      networkAccess: "enabled"
+    }),
+    heartbeat: { enabled: false }
+  }
+];
+
+const plannerAdvisorOrder: PlannerAdvisorId[] = ["founder", "product", "ops", "growth", "reviewer"];
+
+type PlannerAgentTurnPayload = {
+  runId: string;
+  status: string;
+  summary: string;
+  result?: {
+    payloads?: Array<{
+      text?: string;
+      mediaUrl?: string | null;
+    }>;
+    meta?: Record<string, unknown>;
+  };
+};
+
+type PlannerAgentPatch = {
+  company?: Partial<WorkspacePlan["company"]>;
+  product?: Partial<WorkspacePlan["product"]>;
+  workspace?: Partial<WorkspacePlan["workspace"]>;
+  team?: {
+    persistentAgents?: Array<Partial<PlannerPersistentAgentSpec> & { id: string }>;
+    allowEphemeralSubagents?: boolean;
+    maxParallelRuns?: number;
+    escalationRules?: string[];
+  };
+  operations?: {
+    workflows?: Array<Partial<PlannerWorkflowSpec> & { id: string }>;
+    channels?: Array<Partial<PlannerChannelSpec> & { id: string; type?: PlannerChannelSpec["type"] }>;
+    automations?: Array<Partial<PlannerAutomationSpec> & { id: string }>;
+    hooks?: Array<Partial<PlannerHookSpec> & { id: string }>;
+    sandbox?: Partial<PlannerSandboxSpec>;
+  };
+};
+
+type PlannerArchitectAgentResponse = {
+  reply: string;
+  patch?: PlannerAgentPatch;
+  mode?: PlannerExperienceMode | null;
+  reviewRequested?: boolean | null;
+};
+
+type PlannerAdvisorAgentResponse = {
+  summary: string;
+  recommendations?: string[];
+  concerns?: string[];
+};
+
+type WorkspacePlanTurnResult = {
+  plan: WorkspacePlan;
+};
+
+export async function createWorkspacePlan() {
+  const plan = createInitialWorkspacePlan();
+  await saveWorkspacePlan(plan);
+  return {
+    plan
+  };
+}
+
+export async function getWorkspacePlan(planId: string) {
+  const plan = await readWorkspacePlan(planId);
+  return {
+    plan
+  };
+}
+
+export async function updateWorkspacePlan(planId: string, incomingPlan: WorkspacePlan) {
+  const nextPlan = await persistIncomingPlan(planId, incomingPlan);
+  return {
+    plan: nextPlan
+  };
+}
+
+export async function submitWorkspacePlanTurn(
+  planId: string,
+  message: string,
+  incomingPlan?: WorkspacePlan
+): Promise<WorkspacePlanTurnResult> {
+  const trimmedMessage = message.trim();
+
+  if (!trimmedMessage) {
+    throw new Error("Planner message is required.");
+  }
+
+  const basePlan = incomingPlan
+    ? await persistIncomingPlan(planId, incomingPlan)
+    : await readWorkspacePlan(planId);
+  let nextPlan = enrichWorkspacePlan(basePlan);
+  const harvestedContext = await harvestPlannerContext(trimmedMessage);
+
+  nextPlan.conversation.push(createPlannerMessage("user", "Operator", trimmedMessage));
+  nextPlan.intake.started = true;
+  if (!nextPlan.intake.initialPrompt) {
+    nextPlan.intake.initialPrompt = trimmedMessage;
+  }
+  nextPlan.intake.latestPrompt = trimmedMessage;
+  nextPlan.intake.sources = mergePlannerSources(nextPlan.intake.sources, harvestedContext.sources);
+  nextPlan = applyPlannerInput(nextPlan, trimmedMessage);
+  nextPlan = applyHarvestedDefaults(nextPlan, harvestedContext);
+  nextPlan = enrichWorkspacePlan(nextPlan);
+  nextPlan.intake.sources = mergePlannerSources(nextPlan.intake.sources, harvestedContext.sources);
+  nextPlan = enrichWorkspacePlan(nextPlan);
+
+  const runtimeReadyPlan = await ensurePlannerRuntime(nextPlan);
+  const advisorNotes = runtimeReadyPlan.autopilot
+    ? await synthesizePlannerAdvisorsWithRuntime(runtimeReadyPlan, trimmedMessage)
+    : runtimeReadyPlan.advisorNotes;
+  runtimeReadyPlan.advisorNotes = advisorNotes;
+  const architectTurn = await runArchitectPlannerTurn(
+    runtimeReadyPlan,
+    trimmedMessage,
+    harvestedContext,
+    advisorNotes,
+    basePlan
+  );
+  nextPlan = architectTurn.plan;
+  nextPlan.conversation.push(
+    createPlannerMessage(
+      "assistant",
+      "Workspace Architect",
+      architectTurn.reply
+    )
+  );
+  nextPlan = enrichWorkspacePlan(nextPlan);
+
+  await saveWorkspacePlan(nextPlan);
+
+  return {
+    plan: nextPlan
+  };
+}
+
+export async function simulateWorkspacePlan(
+  planId: string,
+  incomingPlan?: WorkspacePlan
+): Promise<WorkspacePlanTurnResult> {
+  const basePlan = incomingPlan
+    ? await persistIncomingPlan(planId, incomingPlan)
+    : await readWorkspacePlan(planId);
+  let nextPlan = await ensurePlannerRuntime(enrichWorkspacePlan(basePlan));
+  const advisorNotes = await synthesizePlannerAdvisorsWithRuntime(nextPlan, "Simulate the specialist planning board.");
+
+  nextPlan.advisorNotes = advisorNotes;
+  const architectTurn = await runArchitectPlannerTurn(
+    nextPlan,
+    "Simulate the specialist planning board and tell me what you would refine next.",
+    {
+      sources: nextPlan.intake.sources,
+      confirmations: nextPlan.intake.confirmations,
+      inferenceText: nextPlan.intake.inferences.map((entry) => `${entry.label}: ${entry.value}`).join("\n"),
+      companyName: nextPlan.company.name || undefined,
+      mission: nextPlan.company.mission || undefined,
+      offer: nextPlan.product.offer || undefined,
+      template: nextPlan.workspace.template
+    },
+    advisorNotes,
+    basePlan
+  );
+  nextPlan = architectTurn.plan;
+  nextPlan.conversation.push(createPlannerMessage("assistant", "Workspace Architect", architectTurn.reply));
+
+  const enrichedPlan = enrichWorkspacePlan(nextPlan);
+  await saveWorkspacePlan(enrichedPlan);
+
+  return {
+    plan: enrichedPlan
+  };
+}
+
+export async function deployWorkspacePlan(
+  planId: string,
+  incomingPlan?: WorkspacePlan
+): Promise<WorkspacePlanDeployResult> {
+  const basePlan = incomingPlan
+    ? await persistIncomingPlan(planId, incomingPlan)
+    : await readWorkspacePlan(planId);
+  const nextPlan = enrichWorkspacePlan({
+    ...basePlan,
+    intake: {
+      ...basePlan.intake,
+      reviewRequested: true
+    }
+  });
+
+  if (nextPlan.deploy.blockers.length > 0) {
+    throw new Error(`Resolve deploy blockers first: ${nextPlan.deploy.blockers.join(" ")}`);
+  }
+
+  nextPlan.status = "deploying";
+  nextPlan.stage = "deploying";
+  await saveWorkspacePlan(nextPlan);
+
+  try {
+    const workspaceInput = buildWorkspaceCreateInput(nextPlan);
+    const created = await createWorkspaceProject(workspaceInput);
+
+    await writePlannerWorkspaceFiles(nextPlan, created.workspacePath, created);
+
+    const createdAgentIdMap = buildCreatedAgentIdMap(nextPlan);
+    const channelProvision = await provisionPlannerChannels(nextPlan.operations.channels);
+    const automationProvision = await provisionPlannerAutomations(
+      nextPlan,
+      created.workspaceId,
+      createdAgentIdMap
+    );
+    const kickoffRunIds = await runPlannerKickoffMissions(nextPlan, created.workspaceId, createdAgentIdMap);
+    const warnings = uniqueStrings([
+      ...nextPlan.deploy.warnings,
+      ...channelProvision.warnings,
+      ...automationProvision.warnings
+    ]);
+
+    nextPlan.deploy = {
+      ...nextPlan.deploy,
+      blockers: [],
+      warnings,
+      lastDeployedAt: new Date().toISOString(),
+      workspaceId: created.workspaceId,
+      workspacePath: created.workspacePath,
+      primaryAgentId: created.primaryAgentId,
+      createdAgentIds: created.agentIds,
+      provisionedChannels: channelProvision.provisioned,
+      provisionedAutomations: automationProvision.provisioned,
+      kickoffRunIds: uniqueStrings([
+        ...(created.kickoffRunId ? [created.kickoffRunId] : []),
+        ...kickoffRunIds
+      ])
+    };
+    nextPlan.status = "deployed";
+    nextPlan.stage = "deployed";
+    nextPlan.conversation.push(
+      createPlannerMessage(
+        "assistant",
+        "Workspace Architect",
+        `DEPLOY completed. Workspace ${created.workspacePath} is live with ${created.agentIds.length} agent${created.agentIds.length === 1 ? "" : "s"}.`
+      )
+    );
+
+    const finalPlan = enrichWorkspacePlan(nextPlan);
+    finalPlan.status = "deployed";
+    finalPlan.stage = "deployed";
+    await saveWorkspacePlan(finalPlan);
+
+    return {
+      plan: finalPlan,
+      workspaceId: created.workspaceId,
+      workspacePath: created.workspacePath,
+      primaryAgentId: created.primaryAgentId,
+      agentIds: created.agentIds,
+      kickoffRunIds: finalPlan.deploy.kickoffRunIds,
+      warnings
+    };
+  } catch (error) {
+    nextPlan.status = "blocked";
+    nextPlan.stage = "pressure-test";
+    nextPlan.deploy.warnings = uniqueStrings([
+      ...nextPlan.deploy.warnings,
+      error instanceof Error ? error.message : "Planner deploy failed."
+    ]);
+    await saveWorkspacePlan(enrichWorkspacePlan(nextPlan));
+    throw error;
+  }
+}
+
+async function persistIncomingPlan(planId: string, incomingPlan: WorkspacePlan) {
+  const storedPlan = await readWorkspacePlan(planId).catch(() => createInitialWorkspacePlan(planId));
+  const mergedPlan = enrichWorkspacePlan({
+    ...storedPlan,
+    ...incomingPlan,
+    id: planId,
+    createdAt: storedPlan.createdAt,
+    runtime: {
+      ...storedPlan.runtime,
+      ...incomingPlan.runtime
+    },
+    deploy: {
+      ...storedPlan.deploy,
+      ...incomingPlan.deploy
+    }
+  });
+
+  await saveWorkspacePlan(mergedPlan);
+  return mergedPlan;
+}
+
+async function readWorkspacePlan(planId: string) {
+  const filePath = getWorkspacePlanFilePath(planId);
+  const raw = await readFile(filePath, "utf8");
+  return enrichWorkspacePlan(JSON.parse(raw) as WorkspacePlan);
+}
+
+async function saveWorkspacePlan(plan: WorkspacePlan) {
+  const filePath = getWorkspacePlanFilePath(plan.id);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+}
+
+function getWorkspacePlanFilePath(planId: string) {
+  return path.join(plansRootPath, `${planId}.json`);
+}
+
+const plannerAdvisorNames: Record<PlannerAdvisorId, string> = {
+  founder: "Founder",
+  product: "Product Lead",
+  ops: "Operations",
+  growth: "Growth",
+  reviewer: "Reviewer",
+  architect: "Workspace Architect"
+};
+
+const plannerRuntimeSkillContents: Record<string, string> = {
+  "planner-architect": `# Workspace Architect
+
+You are the primary planning agent for Mission Control.
+
+## Mission
+- Understand the operator's intent through conversation.
+- Draft the workspace, team, workflows, channels, and automations proactively.
+- Ask only high-value questions when uncertainty would materially change the design.
+
+## Output Contract
+- Always return valid JSON only.
+- Never wrap JSON in markdown fences.
+- Use this schema:
+{
+  "reply": "short natural language response to the operator",
+  "mode": "guided | advanced | null",
+  "reviewRequested": true,
+  "patch": {}
+}
+
+## Rules
+- Keep momentum. Prefer a concrete draft over hesitation.
+- Keep the reply concise and specific.
+- Ask at most two questions.
+- When the operator names the company or workspace, apply it.
+- When a domain or website implies a likely brand name, use it unless contradicted.
+- Treat Mission Control as the source of truth. Patch only the fields that should change.
+`,
+  "planner-founder": `# Founder Advisor
+
+Return valid JSON only:
+{
+  "summary": "commercial read",
+  "recommendations": ["..."],
+  "concerns": ["..."]
+}
+
+Focus on mission clarity, audience, value exchange, and launch posture. Be concise.`,
+  "planner-product": `# Product Lead
+
+Return valid JSON only:
+{
+  "summary": "product read",
+  "recommendations": ["..."],
+  "concerns": ["..."]
+}
+
+Focus on offer, V1 scope, non-goals, and operator experience. Be concise.`,
+  "planner-ops": `# Operations Advisor
+
+Return valid JSON only:
+{
+  "summary": "operations read",
+  "recommendations": ["..."],
+  "concerns": ["..."]
+}
+
+Focus on workflows, automations, channels, run cadence, and reliability. Be concise.`,
+  "planner-growth": `# Growth Advisor
+
+Return valid JSON only:
+{
+  "summary": "growth read",
+  "recommendations": ["..."],
+  "concerns": ["..."]
+}
+
+Focus on acquisition loops, activation, community, and measurable signals. Be concise.`,
+  "planner-reviewer": `# Reviewer
+
+Return valid JSON only:
+{
+  "summary": "risk read",
+  "recommendations": ["..."],
+  "concerns": ["..."]
+}
+
+Pressure-test assumptions, missing info, hidden blockers, and design regressions. Be concise.`
+};
+
+async function ensurePlannerRuntime(plan: WorkspacePlan) {
+  const currentRuntime = createPlannerRuntimeState(plan.id, plan.runtime);
+  const expectedArchitectAgentId = buildPlannerRuntimeAgentId("architect");
+
+  if (
+    currentRuntime.status === "ready" &&
+    currentRuntime.architectAgentId === expectedArchitectAgentId &&
+    currentRuntime.workspacePath === plannerRuntimeWorkspacePath
+  ) {
+    return enrichWorkspacePlan({
+      ...plan,
+      runtime: currentRuntime
+    });
+  }
+
+  let nextPlan = structuredClone(plan);
+
+  try {
+    let snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    let workspace = snapshot.workspaces.find((entry) => entry.path === plannerRuntimeWorkspacePath) ?? null;
+
+    if (!workspace) {
+      await createWorkspaceProject({
+        name: PLANNER_RUNTIME_NAME,
+        directory: plannerRuntimeWorkspacePath,
+        sourceMode: "empty",
+        template: "research",
+        teamPreset: "custom",
+        modelProfile: "balanced",
+        rules: {
+          workspaceOnly: true,
+          generateStarterDocs: false,
+          generateMemory: false,
+          kickoffMission: false
+        },
+        agents: plannerRuntimeAgentBlueprints
+      });
+      await configurePlannerRuntimeWorkspace(plannerRuntimeWorkspacePath);
+      snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+      workspace = snapshot.workspaces.find((entry) => entry.path === plannerRuntimeWorkspacePath) ?? null;
+    } else {
+      await configurePlannerRuntimeWorkspace(workspace.path);
+    }
+
+    if (!workspace) {
+      throw new Error("Planner runtime workspace could not be found after provisioning.");
+    }
+
+    const agentIdsByRole = Object.fromEntries(
+      plannerRuntimeAgentBlueprints.map((agent) => [agent.id, buildPlannerRuntimeAgentId(agent.id)])
+    ) as Record<string, string>;
+    const existingAgentIds = new Set(
+      snapshot.agents
+        .filter((agent) => agent.workspaceId === workspace.id)
+        .map((agent) => agent.id)
+    );
+
+    for (const agent of plannerRuntimeAgentBlueprints) {
+      const expectedAgentId = agentIdsByRole[agent.id];
+      if (existingAgentIds.has(expectedAgentId)) {
+        continue;
+      }
+
+      await createAgent({
+        id: expectedAgentId,
+        workspaceId: workspace.id,
+        name: agent.name,
+        emoji: agent.emoji,
+        theme: agent.theme,
+        policy: agent.policy,
+        heartbeat: agent.heartbeat
+      });
+    }
+
+    await configurePlannerRuntimeWorkspace(workspace.path);
+
+    nextPlan.runtime = createPlannerRuntimeState(plan.id, {
+      ...currentRuntime,
+      mode: "agent",
+      status: "ready",
+      workspaceId: workspace.id,
+      workspacePath: workspace.path,
+      architectAgentId: agentIdsByRole.architect,
+      advisorAgentIds: {
+        founder: agentIdsByRole.founder,
+        product: agentIdsByRole.product,
+        ops: agentIdsByRole.ops,
+        growth: agentIdsByRole.growth,
+        reviewer: agentIdsByRole.reviewer
+      },
+      lastError: undefined
+    });
+  } catch (error) {
+    nextPlan.runtime = createPlannerRuntimeState(plan.id, {
+      ...currentRuntime,
+      mode: "fallback",
+      status: "error",
+      lastError: error instanceof Error ? error.message : "Planner runtime provisioning failed."
+    });
+  }
+
+  return enrichWorkspacePlan(nextPlan);
+}
+
+async function configurePlannerRuntimeWorkspace(workspacePath: string) {
+  await mkdir(path.join(workspacePath, "skills"), { recursive: true });
+
+  for (const [skillId, contents] of Object.entries(plannerRuntimeSkillContents)) {
+    const skillPath = path.join(workspacePath, "skills", skillId, "SKILL.md");
+    await mkdir(path.dirname(skillPath), { recursive: true });
+    await writeFile(skillPath, `${contents.trim()}\n`, "utf8");
+  }
+
+  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
+  let parsed: Record<string, unknown> = {};
+
+  try {
+    parsed = JSON.parse(await readFile(projectFilePath, "utf8")) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+
+  parsed.name = typeof parsed.name === "string" ? parsed.name : PLANNER_RUNTIME_NAME;
+  parsed.hidden = true;
+  parsed.systemTag = PLANNER_RUNTIME_SYSTEM_TAG;
+  parsed.updatedAt = new Date().toISOString();
+
+  await mkdir(path.dirname(projectFilePath), { recursive: true });
+  await writeFile(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+}
+
+async function synthesizePlannerAdvisorsWithRuntime(plan: WorkspacePlan, latestMessage: string) {
+  if (plan.runtime.mode !== "agent" || plan.runtime.status !== "ready") {
+    return synthesizePlannerAdvisors(plan);
+  }
+
+  try {
+    const advisorRuns = await Promise.all(
+      plannerAdvisorOrder.map(async (advisorId) => {
+        const agentId = plan.runtime.advisorAgentIds[advisorId];
+        const sessionId = plan.runtime.advisorSessionIds[advisorId];
+
+        if (!agentId || !sessionId) {
+          return null;
+        }
+
+        const prompt = buildPlannerAdvisorPrompt(plan, advisorId, latestMessage);
+        const result = await runPlannerRuntimeAgent<PlannerAdvisorAgentResponse>({
+          agentId,
+          sessionId,
+          message: prompt,
+          thinking: "medium"
+        });
+
+        return {
+          advisorId,
+          ...result
+        };
+      })
+    );
+
+    const notes: PlannerAdvisorNote[] = advisorRuns
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .map((entry) => ({
+        id: `${entry.advisorId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        advisorId: entry.advisorId,
+        advisorName: plannerAdvisorNames[entry.advisorId],
+        summary: entry.response.summary?.trim() || "No specialist summary returned.",
+        recommendations: uniqueStrings(entry.response.recommendations ?? []).slice(0, 3),
+        concerns: uniqueStrings(entry.response.concerns ?? []).slice(0, 3),
+        createdAt: new Date().toISOString()
+      }));
+
+    plan.runtime = createPlannerRuntimeState(plan.id, {
+      ...plan.runtime,
+      lastAdvisorRunIds: advisorRuns
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+        .map((entry) => entry.runId),
+      lastError: undefined
+    });
+
+    return notes.length > 0 ? notes : synthesizePlannerAdvisors(plan);
+  } catch (error) {
+    plan.runtime = createPlannerRuntimeState(plan.id, {
+      ...plan.runtime,
+      status: "error",
+      mode: "fallback",
+      lastError: error instanceof Error ? error.message : "Advisor runtime failed."
+    });
+    return synthesizePlannerAdvisors(plan);
+  }
+}
+
+async function runArchitectPlannerTurn(
+  plan: WorkspacePlan,
+  latestMessage: string,
+  harvestedContext: PlannerHarvestResult,
+  advisorNotes: PlannerAdvisorNote[],
+  previousPlan?: WorkspacePlan
+) {
+  if (plan.runtime.mode !== "agent" || plan.runtime.status !== "ready" || !plan.runtime.architectAgentId) {
+    return {
+      plan,
+      reply: createArchitectReply(plan, advisorNotes, latestMessage, previousPlan).text
+    };
+  }
+
+  try {
+    const result = await runPlannerRuntimeAgent<PlannerArchitectAgentResponse>({
+      agentId: plan.runtime.architectAgentId,
+      sessionId: plan.runtime.architectSessionId,
+      message: buildPlannerArchitectPrompt(plan, latestMessage, harvestedContext, advisorNotes),
+      thinking: "high"
+    });
+
+    let nextPlan = structuredClone(plan);
+    if (result.response.mode === "guided" || result.response.mode === "advanced") {
+      nextPlan.intake.mode = result.response.mode;
+    }
+
+    if (typeof result.response.reviewRequested === "boolean") {
+      nextPlan.intake.reviewRequested = result.response.reviewRequested;
+    }
+
+    if (result.response.patch) {
+      nextPlan = applyPlannerAgentPatch(nextPlan, result.response.patch);
+    }
+
+    nextPlan.runtime = createPlannerRuntimeState(nextPlan.id, {
+      ...nextPlan.runtime,
+      mode: "agent",
+      status: "ready",
+      lastArchitectRunId: result.runId,
+      lastError: undefined
+    });
+
+    return {
+      plan: enrichWorkspacePlan(nextPlan),
+      reply:
+        result.response.reply?.trim() ||
+        createArchitectReply(nextPlan, advisorNotes, latestMessage, previousPlan).text
+    };
+  } catch (error) {
+    const fallbackPlan = enrichWorkspacePlan({
+      ...plan,
+      runtime: createPlannerRuntimeState(plan.id, {
+        ...plan.runtime,
+        mode: "fallback",
+        status: "error",
+        lastError: error instanceof Error ? error.message : "Architect runtime failed."
+      })
+    });
+
+    return {
+      plan: fallbackPlan,
+      reply: createArchitectReply(fallbackPlan, advisorNotes, latestMessage, previousPlan).text
+    };
+  }
+}
+
+async function runPlannerRuntimeAgent<T>({
+  agentId,
+  sessionId,
+  message,
+  thinking
+}: {
+  agentId: string;
+  sessionId: string;
+  message: string;
+  thinking: "off" | "minimal" | "low" | "medium" | "high";
+}) {
+  const payload = await runOpenClawJson<PlannerAgentTurnPayload>(
+    [
+      "agent",
+      "--agent",
+      agentId,
+      "--session-id",
+      sessionId,
+      "--message",
+      message,
+      "--thinking",
+      thinking,
+      "--timeout",
+      "120",
+      "--json"
+    ],
+    { timeoutMs: 125000 }
+  );
+  const text = extractPlannerPayloadText(payload);
+  return {
+    runId: payload.runId,
+    text,
+    response: extractPlannerJson<T>(text)
+  };
+}
+
+function buildPlannerArchitectPrompt(
+  plan: WorkspacePlan,
+  latestMessage: string,
+  harvestedContext: PlannerHarvestResult,
+  advisorNotes: PlannerAdvisorNote[]
+) {
+  return [
+    "You are Workspace Architect, the primary planning agent inside Mission Control.",
+    "Return valid JSON only. Do not wrap the JSON in markdown fences.",
+    'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":true,"patch":{}}',
+    "Rules:",
+    "- Prefer drafting likely decisions instead of asking for every missing field.",
+    "- If the operator asks you to infer, extract, or fill missing details from linked context, fill every plausible field before asking follow-up questions.",
+    "- Ask at most one high-value question when harvested context already includes a website or repo.",
+    "- Do not ask about non-goals, polish, or V1 exclusions until mission, audience, and offer are already grounded.",
+    "- Keep reply concise, concrete, and operator-facing.",
+    "- When the operator gives a company or workspace name, apply it immediately.",
+    "- When a domain implies a likely brand name, use it unless contradicted.",
+    "- When you still need confirmation after reading a source, state what you inferred first and ask only for the remaining ambiguity.",
+    "- Patch only fields that should change.",
+    "",
+    "Context JSON:",
+    JSON.stringify(
+      {
+        operatorMessage: latestMessage,
+        architectSummary: plan.architectSummary,
+        currentPlan: createPlannerPromptContext(plan),
+        harvestedContext,
+        advisorNotes: advisorNotes.map((note) => ({
+          advisor: note.advisorName,
+          summary: note.summary,
+          recommendations: note.recommendations,
+          concerns: note.concerns
+        })),
+        recentConversation: plan.conversation.slice(-8).map((entry) => ({
+          role: entry.role,
+          author: entry.author,
+          text: entry.text
+        }))
+      },
+      null,
+      2
+    )
+  ].join("\n");
+}
+
+function buildPlannerAdvisorPrompt(
+  plan: WorkspacePlan,
+  advisorId: PlannerAdvisorId,
+  latestMessage: string
+) {
+  return [
+    `You are the ${plannerAdvisorNames[advisorId]} advisor for planner orchestration.`,
+    "Return valid JSON only. Do not wrap the JSON in markdown fences.",
+    'Schema: {"summary":"string","recommendations":["..."],"concerns":["..."]}',
+    "Keep the output concise and role-specific.",
+    "",
+    "Context JSON:",
+    JSON.stringify(
+      {
+        advisor: advisorId,
+        latestOperatorMessage: latestMessage,
+        currentPlan: createPlannerPromptContext(plan),
+        recentConversation: plan.conversation.slice(-6).map((entry) => ({
+          role: entry.role,
+          author: entry.author,
+          text: entry.text
+        }))
+      },
+      null,
+      2
+    )
+  ].join("\n");
+}
+
+function createPlannerPromptContext(plan: WorkspacePlan) {
+  return {
+    company: plan.company,
+    product: plan.product,
+    workspace: plan.workspace,
+    team: {
+      persistentAgents: plan.team.persistentAgents,
+      allowEphemeralSubagents: plan.team.allowEphemeralSubagents,
+      maxParallelRuns: plan.team.maxParallelRuns,
+      escalationRules: plan.team.escalationRules
+    },
+    operations: plan.operations,
+    intake: {
+      mode: plan.intake.mode,
+      reviewRequested: plan.intake.reviewRequested,
+      confirmations: plan.intake.confirmations,
+      sources: plan.intake.sources,
+      inferences: plan.intake.inferences
+    }
+  };
+}
+
+function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
+  let nextPlan = structuredClone(plan);
+
+  if (patch.workspace?.template && isWorkspaceTemplateValue(patch.workspace.template) && patch.workspace.template !== nextPlan.workspace.template) {
+    nextPlan = applyPlannerTemplate(nextPlan, patch.workspace.template);
+  }
+
+  if (patch.company) {
+    nextPlan.company = {
+      ...nextPlan.company,
+      ...patch.company
+    };
+  }
+
+  if (patch.product) {
+    nextPlan.product = {
+      ...nextPlan.product,
+      ...patch.product
+    };
+  }
+
+  if (patch.workspace) {
+    nextPlan.workspace = {
+      ...nextPlan.workspace,
+      ...patch.workspace,
+      rules: {
+        ...nextPlan.workspace.rules,
+        ...(patch.workspace.rules ?? {})
+      }
+    };
+  }
+
+  if (patch.team) {
+    nextPlan.team = {
+      ...nextPlan.team,
+      allowEphemeralSubagents:
+        patch.team.allowEphemeralSubagents ?? nextPlan.team.allowEphemeralSubagents,
+      maxParallelRuns: patch.team.maxParallelRuns ?? nextPlan.team.maxParallelRuns,
+      escalationRules: patch.team.escalationRules ?? nextPlan.team.escalationRules,
+      persistentAgents: patch.team.persistentAgents
+        ? mergePlannerAgents(nextPlan.team.persistentAgents, patch.team.persistentAgents)
+        : nextPlan.team.persistentAgents
+    };
+  }
+
+  if (patch.operations) {
+    nextPlan.operations = {
+      ...nextPlan.operations,
+      workflows: patch.operations.workflows
+        ? mergePlannerWorkflows(nextPlan.operations.workflows, patch.operations.workflows)
+        : nextPlan.operations.workflows,
+      channels: patch.operations.channels
+        ? mergePlannerChannels(nextPlan.operations.channels, patch.operations.channels)
+        : nextPlan.operations.channels,
+      automations: patch.operations.automations
+        ? mergePlannerAutomations(nextPlan.operations.automations, patch.operations.automations)
+        : nextPlan.operations.automations,
+      hooks: patch.operations.hooks
+        ? mergePlannerHooks(nextPlan.operations.hooks, patch.operations.hooks)
+        : nextPlan.operations.hooks,
+      sandbox: patch.operations.sandbox
+        ? createPlannerSandboxSpec({
+            ...nextPlan.operations.sandbox,
+            ...patch.operations.sandbox
+          })
+        : nextPlan.operations.sandbox
+    };
+  }
+
+  return enrichWorkspacePlan(nextPlan);
+}
+
+function mergePlannerAgents(
+  current: PlannerPersistentAgentSpec[],
+  incoming: Array<Partial<PlannerPersistentAgentSpec> & { id: string }>
+) {
+  const merged = new Map(current.map((agent) => [agent.id, agent]));
+
+  for (const candidate of incoming) {
+    const id = slugify(candidate.id);
+    if (!id) {
+      continue;
+    }
+
+    const previous = merged.get(id);
+    merged.set(
+      id,
+      createPlannerAgentSpec({
+        ...previous,
+        ...candidate,
+        id,
+        responsibilities: candidate.responsibilities ?? previous?.responsibilities,
+        outputs: candidate.outputs ?? previous?.outputs,
+        heartbeat: candidate.heartbeat ?? previous?.heartbeat,
+        policy: candidate.policy ?? previous?.policy
+      })
+    );
+  }
+
+  return Array.from(merged.values());
+}
+
+function mergePlannerWorkflows(
+  current: PlannerWorkflowSpec[],
+  incoming: Array<Partial<PlannerWorkflowSpec> & { id: string }>
+) {
+  const merged = new Map(current.map((workflow) => [workflow.id, workflow]));
+
+  for (const candidate of incoming) {
+    const id = slugify(candidate.id);
+    if (!id) {
+      continue;
+    }
+
+    const previous = merged.get(id);
+    merged.set(
+      id,
+      createPlannerWorkflowSpec({
+        ...previous,
+        ...candidate,
+        id,
+        collaboratorAgentIds: candidate.collaboratorAgentIds ?? previous?.collaboratorAgentIds,
+        outputs: candidate.outputs ?? previous?.outputs,
+        channelIds: candidate.channelIds ?? previous?.channelIds
+      })
+    );
+  }
+
+  return Array.from(merged.values());
+}
+
+function mergePlannerChannels(
+  current: PlannerChannelSpec[],
+  incoming: Array<Partial<PlannerChannelSpec> & { id: string; type?: PlannerChannelSpec["type"] }>
+) {
+  const merged = new Map(current.map((channel) => [channel.id, channel]));
+
+  for (const candidate of incoming) {
+    const id = slugify(candidate.id);
+    const previous = merged.get(id);
+    const type = isPlannerChannelTypeValue(candidate.type) ? candidate.type : previous?.type;
+
+    if (!id || !type) {
+      continue;
+    }
+
+    merged.set(
+      id,
+      createPlannerChannelSpec(type, {
+        ...previous,
+        ...candidate,
+        id,
+        credentials: candidate.credentials ?? previous?.credentials
+      })
+    );
+  }
+
+  return Array.from(merged.values());
+}
+
+function mergePlannerAutomations(
+  current: PlannerAutomationSpec[],
+  incoming: Array<Partial<PlannerAutomationSpec> & { id: string }>
+) {
+  const merged = new Map(current.map((automation) => [automation.id, automation]));
+
+  for (const candidate of incoming) {
+    const id = slugify(candidate.id);
+    if (!id) {
+      continue;
+    }
+
+    const previous = merged.get(id);
+    merged.set(
+      id,
+      createPlannerAutomationSpec({
+        ...previous,
+        ...candidate,
+        id
+      })
+    );
+  }
+
+  return Array.from(merged.values());
+}
+
+function mergePlannerHooks(
+  current: PlannerHookSpec[],
+  incoming: Array<Partial<PlannerHookSpec> & { id: string }>
+) {
+  const merged = new Map(current.map((hook) => [hook.id, hook]));
+
+  for (const candidate of incoming) {
+    const id = slugify(candidate.id);
+    if (!id) {
+      continue;
+    }
+
+    const previous = merged.get(id);
+    merged.set(
+      id,
+      createPlannerHookSpec({
+        ...previous,
+        ...candidate,
+        id
+      })
+    );
+  }
+
+  return Array.from(merged.values());
+}
+
+function extractPlannerPayloadText(payload: PlannerAgentTurnPayload) {
+  const payloadText = payload.result?.payloads
+    ?.map((entry) => entry.text?.trim())
+    .filter((entry): entry is string => Boolean(entry))
+    .join("\n\n");
+
+  return payloadText || payload.summary || "{}";
+}
+
+function extractPlannerJson<T>(text: string): T {
+  const trimmed = text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "");
+
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {}
+
+  const lines = trimmed.split(/\r?\n/);
+  for (let start = 0; start < lines.length; start += 1) {
+    const line = lines[start].trim();
+    if (!line.startsWith("{") && !line.startsWith("[")) {
+      continue;
+    }
+
+    for (let end = lines.length; end > start; end -= 1) {
+      const candidate = lines.slice(start, end).join("\n").trim();
+      try {
+        return JSON.parse(candidate) as T;
+      } catch {}
+    }
+  }
+
+  throw new Error(`Planner agent returned invalid JSON: ${trimmed.slice(0, 800)}`);
+}
+
+function buildPlannerRuntimeAgentId(agentKey: string) {
+  return `${slugify(PLANNER_RUNTIME_NAME)}-${slugify(agentKey) || "agent"}`;
+}
+
+function isWorkspaceTemplateValue(value: unknown): value is WorkspaceTemplate {
+  return (
+    value === "software" ||
+    value === "frontend" ||
+    value === "backend" ||
+    value === "research" ||
+    value === "content"
+  );
+}
+
+function isPlannerChannelTypeValue(value: unknown): value is PlannerChannelSpec["type"] {
+  return (
+    value === "internal" ||
+    value === "slack" ||
+    value === "telegram" ||
+    value === "discord" ||
+    value === "googlechat"
+  );
+}
+
+function buildWorkspaceCreateInput(plan: WorkspacePlan): WorkspaceCreateInput {
+  const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled);
+
+  return {
+    name: plan.workspace.name,
+    brief: buildWorkspaceBrief(plan),
+    directory: plan.workspace.directory,
+    modelId: plan.workspace.modelId,
+    sourceMode: plan.workspace.sourceMode,
+    repoUrl: plan.workspace.repoUrl,
+    existingPath: plan.workspace.existingPath,
+    template: plan.workspace.template,
+    teamPreset: "custom",
+    modelProfile: plan.workspace.modelProfile,
+    rules: {
+      ...plan.workspace.rules,
+      workspaceOnly: plan.operations.sandbox.workspaceOnly
+    },
+    agents: enabledAgents.map(mapPlannerAgentToWorkspaceAgent)
+  };
+}
+
+function mapPlannerAgentToWorkspaceAgent(
+  agent: WorkspacePlan["team"]["persistentAgents"][number]
+): WorkspaceAgentBlueprintInput {
+  return {
+    id: agent.id,
+    role: agent.role,
+    name: agent.name,
+    enabled: agent.enabled,
+    emoji: agent.emoji,
+    theme: agent.theme,
+    skillId: agent.skillId,
+    modelId: agent.modelId,
+    isPrimary: agent.isPrimary,
+    policy: agent.policy,
+    heartbeat: agent.heartbeat
+  };
+}
+
+function buildWorkspaceBrief(plan: WorkspacePlan) {
+  return [
+    plan.company.mission ? `Mission: ${plan.company.mission}` : "",
+    plan.company.targetCustomer ? `Target customer: ${plan.company.targetCustomer}` : "",
+    plan.product.offer ? `Offer: ${plan.product.offer}` : "",
+    plan.product.scopeV1.length > 0 ? `V1 scope: ${plan.product.scopeV1.join(", ")}` : "",
+    plan.product.nonGoals.length > 0 ? `Non-goals: ${plan.product.nonGoals.join(", ")}` : "",
+    plan.company.successSignals.length > 0
+      ? `Success signals: ${plan.company.successSignals.join(", ")}`
+      : "",
+    plan.workspace.stackDecisions.length > 0
+      ? `Stack decisions: ${plan.workspace.stackDecisions.join(", ")}`
+      : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function writePlannerWorkspaceFiles(
+  plan: WorkspacePlan,
+  workspacePath: string,
+  created: Awaited<ReturnType<typeof createWorkspaceProject>>
+) {
+  const plannerPath = path.join(workspacePath, ".openclaw", "planner");
+  const docsPath = path.join(workspacePath, "docs");
+
+  await mkdir(plannerPath, { recursive: true });
+  await mkdir(docsPath, { recursive: true });
+
+  const workflowSummary = plan.operations.workflows
+    .map((workflow) =>
+      [
+        `## ${workflow.name}`,
+        `- Goal: ${workflow.goal || "Unset"}`,
+        `- Trigger: ${workflow.trigger}`,
+        `- Owner: ${workflow.ownerAgentId || "Unassigned"}`,
+        workflow.collaboratorAgentIds.length > 0
+          ? `- Collaborators: ${workflow.collaboratorAgentIds.join(", ")}`
+          : "",
+        `- Success: ${workflow.successDefinition || "Unset"}`,
+        workflow.outputs.length > 0 ? `- Outputs: ${workflow.outputs.join(", ")}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .join("\n\n");
+
+  const companyBrief = [
+    `# ${plan.company.name || plan.workspace.name || "Workspace"} Company Plan`,
+    "",
+    `## Mission`,
+    plan.company.mission || "Unset",
+    "",
+    `## Target customer`,
+    plan.company.targetCustomer || "Unset",
+    "",
+    `## Offer`,
+    plan.product.offer || "Unset",
+    "",
+    `## V1 scope`,
+    plan.product.scopeV1.length > 0 ? plan.product.scopeV1.map((entry) => `- ${entry}`).join("\n") : "- Unset",
+    "",
+    `## Non-goals`,
+    plan.product.nonGoals.length > 0 ? plan.product.nonGoals.map((entry) => `- ${entry}`).join("\n") : "- Unset",
+    "",
+    `## Success signals`,
+    plan.company.successSignals.length > 0
+      ? plan.company.successSignals.map((entry) => `- ${entry}`).join("\n")
+      : "- Unset"
+  ].join("\n");
+
+  await writeFile(path.join(plannerPath, "blueprint.json"), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+  await writeFile(
+    path.join(plannerPath, "deploy-report.json"),
+    `${JSON.stringify(
+      {
+        deployedAt: new Date().toISOString(),
+        workspaceId: created.workspaceId,
+        workspacePath: created.workspacePath,
+        primaryAgentId: created.primaryAgentId,
+        agentIds: created.agentIds,
+        kickoffRunId: created.kickoffRunId ?? null
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(path.join(docsPath, "company.md"), `${companyBrief}\n`, "utf8");
+  await writeFile(path.join(docsPath, "workflows.md"), `# Workflows\n\n${workflowSummary}\n`, "utf8");
+}
+
+async function provisionPlannerChannels(channels: PlannerChannelSpec[]) {
+  const provisioned: string[] = [];
+  const warnings: string[] = [];
+
+  for (const channel of channels.filter((entry) => entry.enabled && entry.type !== "internal")) {
+    const credentialMap = Object.fromEntries(
+      channel.credentials.map((credential) => [credential.key, credential.value.trim()])
+    );
+    const args = buildChannelCommandArgs(channel, credentialMap);
+
+    if (!args) {
+      warnings.push(`Channel "${channel.name}" uses an unsupported provisioning shape.`);
+      continue;
+    }
+
+    try {
+      await runOpenClaw(args, { timeoutMs: 60000 });
+      provisioned.push(channel.name);
+    } catch (error) {
+      warnings.push(
+        `Channel "${channel.name}" could not be provisioned: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`
+      );
+    }
+  }
+
+  return {
+    provisioned,
+    warnings
+  };
+}
+
+function buildChannelCommandArgs(channel: PlannerChannelSpec, credentialMap: Record<string, string>) {
+  switch (channel.type) {
+    case "telegram":
+      return credentialMap.token
+        ? [
+            "channels",
+            "add",
+            "--channel",
+            "telegram",
+            "--token",
+            credentialMap.token,
+            "--name",
+            channel.name
+          ]
+        : null;
+    case "discord":
+      return credentialMap.token
+        ? [
+            "channels",
+            "add",
+            "--channel",
+            "discord",
+            "--token",
+            credentialMap.token,
+            "--name",
+            channel.name
+          ]
+        : null;
+    case "slack":
+      return credentialMap.botToken
+        ? [
+            "channels",
+            "add",
+            "--channel",
+            "slack",
+            "--bot-token",
+            credentialMap.botToken,
+            "--name",
+            channel.name
+          ]
+        : null;
+    case "googlechat":
+      return credentialMap.webhookUrl
+        ? [
+            "channels",
+            "add",
+            "--channel",
+            "googlechat",
+            "--webhook-url",
+            credentialMap.webhookUrl,
+            "--name",
+            channel.name
+          ]
+        : null;
+    default:
+      return null;
+  }
+}
+
+async function provisionPlannerAutomations(
+  plan: WorkspacePlan,
+  workspaceId: string,
+  createdAgentIdMap: Record<string, string>
+) {
+  const provisioned: string[] = [];
+  const warnings: string[] = [];
+
+  for (const automation of plan.operations.automations.filter((entry) => entry.enabled)) {
+    const args = buildAutomationCommandArgs(plan, automation, createdAgentIdMap);
+
+    if (!args) {
+      warnings.push(`Automation "${automation.name}" could not be mapped to a live agent.`);
+      continue;
+    }
+
+    try {
+      await runOpenClaw(args, { timeoutMs: 60000 });
+      provisioned.push(automation.name);
+    } catch (error) {
+      warnings.push(
+        `Automation "${automation.name}" failed to provision: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`
+      );
+    }
+  }
+
+  const snapshot = await getMissionControlSnapshot({ force: true });
+  if (!snapshot.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    warnings.push("Workspace snapshot did not refresh immediately after deploy.");
+  }
+
+  return {
+    provisioned,
+    warnings
+  };
+}
+
+function buildAutomationCommandArgs(
+  plan: WorkspacePlan,
+  automation: PlannerAutomationSpec,
+  createdAgentIdMap: Record<string, string>
+) {
+  const mappedAgentId = automation.agentId ? createdAgentIdMap[automation.agentId] : undefined;
+
+  if (!mappedAgentId) {
+    return null;
+  }
+
+  const args = [
+    "cron",
+    "add",
+    "--name",
+    automation.name,
+    "--description",
+    automation.description || automation.name,
+    "--agent",
+    mappedAgentId,
+    "--message",
+    automation.mission,
+    "--thinking",
+    automation.thinking,
+    "--timeout-seconds",
+    "120",
+    "--json"
+  ];
+
+  if (automation.scheduleKind === "every") {
+    args.push("--every", automation.scheduleValue);
+  } else {
+    args.push("--cron", automation.scheduleValue);
+  }
+
+  if (automation.announce && automation.channelId) {
+    const channel = plan.operations.channels.find((entry) => entry.id === automation.channelId);
+    if (channel && channel.type !== "internal") {
+      args.push("--announce", "--channel", channel.type);
+      if (channel.target) {
+        args.push("--to", channel.target);
+      }
+    }
+  }
+
+  return args;
+}
+
+async function runPlannerKickoffMissions(
+  plan: WorkspacePlan,
+  workspaceId: string,
+  createdAgentIdMap: Record<string, string>
+) {
+  const kickoffAssignments = [
+    {
+      agentId:
+        createdAgentIdMap[plan.team.persistentAgents.find((agent) => agent.enabled && agent.isPrimary)?.id ?? ""],
+      mission: plan.deploy.firstMissions[0]
+    },
+    {
+      agentId:
+        createdAgentIdMap[
+          plan.team.persistentAgents.find((agent) => agent.enabled && /review/i.test(agent.role))?.id ?? ""
+        ],
+      mission: plan.deploy.firstMissions[1]
+    },
+    {
+      agentId:
+        createdAgentIdMap[
+          plan.team.persistentAgents.find((agent) => agent.enabled && /learn/i.test(agent.role))?.id ?? ""
+        ],
+      mission: plan.deploy.firstMissions[2]
+    }
+  ].filter((entry) => entry.agentId && entry.mission);
+
+  const runIds: string[] = [];
+
+  for (const assignment of kickoffAssignments) {
+    try {
+      const response = await submitMission({
+        agentId: assignment.agentId,
+        workspaceId,
+        mission: assignment.mission,
+        thinking: "medium"
+      });
+      runIds.push(response.runId);
+    } catch {
+      continue;
+    }
+  }
+
+  return runIds;
+}
+
+type PlannerHarvestResult = {
+  sources: PlannerContextSource[];
+  confirmations: string[];
+  inferenceText: string;
+  companyName?: string;
+  mission?: string;
+  offer?: string;
+  targetCustomer?: string;
+  successSignals?: string[];
+  revenueModel?: string;
+  template?: WorkspaceTemplate;
+};
+
+async function harvestPlannerContext(message: string): Promise<PlannerHarvestResult> {
+  const urls = extractUrls(message);
+  const confirmations: string[] = [];
+  const sources: PlannerContextSource[] = [];
+  const inferenceChunks: string[] = [];
+  let companyName: string | undefined;
+  let mission: string | undefined;
+  let offer: string | undefined;
+  let targetCustomer: string | undefined;
+  let revenueModel: string | undefined;
+  const successSignals: string[] = [];
+  let template: WorkspaceTemplate | undefined;
+
+  const websiteUrls: string[] = [];
+
+  for (const url of urls) {
+    if (isLikelyRepositoryUrl(url)) {
+      sources.push(
+        createPlannerContextSource({
+          kind: "repo",
+          label: summarizeUrlLabel(url),
+          url,
+          summary: "Repository candidate detected from the prompt.",
+          details: ["The architect will treat this link as a repository source."]
+        })
+      );
+      continue;
+    }
+    websiteUrls.push(url);
+  }
+
+  const inspectedWebsites = await Promise.all(websiteUrls.map((url) => inspectWebsiteContext(url)));
+
+  for (const inspected of inspectedWebsites) {
+    sources.push(inspected.source);
+
+    if (inspected.inferenceText) {
+      inferenceChunks.push(inspected.inferenceText);
+    }
+
+    if (!companyName && inspected.companyName) {
+      companyName = inspected.companyName;
+    }
+
+    if (!mission && inspected.mission) {
+      mission = inspected.mission;
+    }
+
+    if (!offer && inspected.offer) {
+      offer = inspected.offer;
+    }
+
+    if (!targetCustomer && inspected.targetCustomer) {
+      targetCustomer = inspected.targetCustomer;
+    }
+
+    if (!revenueModel && inspected.revenueModel) {
+      revenueModel = inspected.revenueModel;
+    }
+
+    successSignals.push(...(inspected.successSignals ?? []));
+
+    if (!template && inspected.template) {
+      template = inspected.template;
+    }
+
+    confirmations.push(...inspected.confirmations);
+  }
+
+  return {
+    sources,
+    confirmations: uniqueStrings(confirmations),
+    inferenceText: [message.trim(), ...inferenceChunks].filter(Boolean).join("\n"),
+    companyName,
+    mission,
+    offer,
+    targetCustomer,
+    successSignals: uniqueStrings(successSignals).slice(0, 3),
+    revenueModel,
+    template
+  };
+}
+
+async function inspectWebsiteContext(url: string): Promise<{
+  source: PlannerContextSource;
+  confirmations: string[];
+  inferenceText: string;
+  companyName?: string;
+  mission?: string;
+  offer?: string;
+  targetCustomer?: string;
+  successSignals?: string[];
+  revenueModel?: string;
+  template?: WorkspaceTemplate;
+}> {
+  const label = summarizeUrlLabel(url);
+
+  try {
+    const response = await fetchWebsiteResponse(url);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const title = extractPreferredMeta(html, ["og:title", "twitter:title"]) ?? extractTagText(html, "title");
+    const description =
+      extractPreferredMeta(html, ["og:description", "twitter:description", "description"]) ??
+      extractFirstParagraph(html);
+    const heading = extractTagText(html, "h1");
+    const snippets = uniqueStrings([heading ?? "", extractFirstParagraph(html), extractSecondParagraph(html)]).filter(
+      Boolean
+    );
+    const harvestText = [title ?? "", description ?? "", ...snippets].filter(Boolean).join(" ");
+    const inferredCompanyName = cleanBrandName(title);
+    const inferredMission = description || heading;
+    const inferredOffer = description || heading;
+    const templateHint = detectTemplateFromHarvest(`${title ?? ""} ${description ?? ""} ${heading ?? ""}`);
+    const inferredTargetCustomer = inferTargetCustomerFromHarvest(harvestText);
+    const inferredSuccessSignals = inferSuccessSignalsFromHarvest(harvestText, templateHint);
+    const inferredRevenueModel = inferRevenueModelFromHarvest(harvestText);
+    const confirmations: string[] = [];
+
+    if (!description) {
+      confirmations.push(`I read ${label} but still need a concise mission sentence.`);
+    }
+
+    if (!heading && !inferredTargetCustomer) {
+      confirmations.push(`I inspected ${label}, but the target customer is still not obvious from the page alone.`);
+    }
+
+    return {
+      source: createPlannerContextSource({
+        kind: "website",
+        label: inferredCompanyName || label,
+        url,
+        summary: description || heading || "Website context captured from the linked page.",
+        details: snippets
+      }),
+      confirmations,
+      inferenceText: [
+        inferredCompanyName ? `Company name: ${inferredCompanyName}` : "",
+        inferredMission ? `Mission: ${inferredMission}` : "",
+        inferredOffer ? `Offer: ${inferredOffer}` : "",
+        inferredTargetCustomer ? `Target customer: ${inferredTargetCustomer}` : "",
+        inferredRevenueModel ? `Revenue model: ${inferredRevenueModel}` : "",
+        inferredSuccessSignals.length > 0 ? `Success signals: ${inferredSuccessSignals.join(" | ")}` : "",
+        snippets.length > 0 ? `Website notes: ${snippets.join(" | ")}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      companyName: inferredCompanyName,
+      mission: inferredMission,
+      offer: inferredOffer,
+      targetCustomer: inferredTargetCustomer,
+      successSignals: inferredSuccessSignals,
+      revenueModel: inferredRevenueModel,
+      template: templateHint
+    };
+  } catch (error) {
+    return {
+      source: createPlannerContextSource({
+        kind: "website",
+        label,
+        url,
+        summary: "Website could not be inspected automatically.",
+        details: [],
+        status: "error",
+        error: error instanceof Error ? error.message : "Unknown website inspection error."
+      }),
+      confirmations: [`I could not inspect ${label}. Confirm the company context manually if this link matters.`],
+      inferenceText: ""
+    };
+  }
+}
+
+async function fetchWebsiteResponse(url: string) {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(
+          new Error(
+            `Website inspection timed out after ${Math.ceil(WEBSITE_INSPECTION_TIMEOUT_MS / 1000)} seconds.`
+          )
+        );
+      }, WEBSITE_INSPECTION_TIMEOUT_MS);
+    });
+
+    return await Promise.race([
+      fetch(url, {
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "OpenClaw Mission Control Planner/0.1"
+        },
+        cache: "no-store"
+      }),
+      timeoutPromise
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function applyHarvestedDefaults(plan: WorkspacePlan, harvest: PlannerHarvestResult) {
+  let nextPlan = structuredClone(plan);
+
+  if (harvest.template && nextPlan.workspace.template === "software" && harvest.template !== nextPlan.workspace.template) {
+    nextPlan = applyPlannerTemplate(nextPlan, harvest.template);
+  }
+
+  if (!nextPlan.company.name && harvest.companyName) {
+    nextPlan.company.name = harvest.companyName;
+  }
+
+  if ((!nextPlan.workspace.name || looksLikeGeneratedWorkspaceName(nextPlan.workspace.name)) && harvest.companyName) {
+    nextPlan.workspace.name = harvest.companyName;
+  }
+
+  if (!nextPlan.company.mission && harvest.mission) {
+    nextPlan.company.mission = harvest.mission;
+  }
+
+  if (!nextPlan.product.offer && harvest.offer) {
+    nextPlan.product.offer = harvest.offer;
+  }
+
+  if (!nextPlan.company.targetCustomer && harvest.targetCustomer) {
+    nextPlan.company.targetCustomer = harvest.targetCustomer;
+  }
+
+  if (!nextPlan.product.revenueModel && harvest.revenueModel) {
+    nextPlan.product.revenueModel = harvest.revenueModel;
+  }
+
+  if (harvest.successSignals?.length) {
+    nextPlan.company.successSignals = uniqueStrings([
+      ...nextPlan.company.successSignals,
+      ...harvest.successSignals
+    ]).slice(0, 3);
+  }
+
+  return nextPlan;
+}
+
+function mergePlannerSources(current: PlannerContextSource[], incoming: PlannerContextSource[]) {
+  const merged = [...current];
+
+  for (const source of incoming) {
+    const existingIndex = merged.findIndex(
+      (entry) => (entry.url && source.url ? entry.url === source.url : entry.id === source.id)
+    );
+
+    if (existingIndex >= 0) {
+      merged[existingIndex] = source;
+      continue;
+    }
+
+    merged.push(source);
+  }
+
+  return merged;
+}
+
+function extractUrls(text: string) {
+  const explicitUrls = text.match(/https?:\/\/[^\s)]+/g) ?? [];
+  const bareDomains =
+    text.match(/\b(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?:\/[^\s)]*)?/gi) ??
+    [];
+
+  return Array.from(
+    new Set(
+      [...explicitUrls, ...bareDomains]
+        .map((value) => normalizeUrlCandidate(value))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+}
+
+function normalizeUrlCandidate(value: string) {
+  if (value.includes("@")) {
+    return null;
+  }
+
+  const cleaned = value.replace(/[),.;!?]+$/g, "");
+  const candidate = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+
+  try {
+    const url = new URL(candidate);
+    return url.hostname.includes(".") ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function isLikelyRepositoryUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase();
+
+    return (
+      host === "github.com" ||
+      host === "gitlab.com" ||
+      host === "bitbucket.org" ||
+      pathname.endsWith(".git")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function summarizeUrlLabel(value: string) {
+  try {
+    const url = new URL(value);
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return value;
+  }
+}
+
+function inferTargetCustomerFromHarvest(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const lower = normalized.toLowerCase();
+
+  const explicitPatterns = [
+    /\b(?:for|serving|built for|designed for|helps?|empowers?|supports?)\s+([^.?!:\n]+)/i,
+    /\b(?:users?|customers?|audience|members?)\s*[:\-]\s*([^.?!\n]+)/i
+  ];
+
+  for (const pattern of explicitPatterns) {
+    const match = normalized.match(pattern);
+    const candidate = sanitizeHarvestedSegment(match?.[1] ?? "");
+    if (looksLikeCustomerSegment(candidate)) {
+      return candidate;
+    }
+  }
+
+  const hasWeb3 = /\bweb3|onchain|crypto|blockchain|token\b/.test(lower);
+  const hasStartup = /\bstartup|startups|founder|founders|business(?:es)?\b/.test(lower);
+  const hasCommunity = /\bcommunity|communities|member|members|holder|holders|nft|dao|governance\b/.test(lower);
+  const hasDeveloper = /\bdeveloper|developers|builder|builders|engineer|engineers\b/.test(lower);
+  const hasOperator = /\boperator|operators|moderator|moderators|admin|admins|ops\b/.test(lower);
+  const hasBrand = /\bbrand|brands|creator|creators|marketing|marketers|growth teams?\b/.test(lower);
+
+  if (hasStartup && hasCommunity) {
+    return hasWeb3 ? "Web3 startups and token-led communities" : "Startups and their communities";
+  }
+
+  if (hasStartup) {
+    return hasWeb3 ? "Web3 startups and founders" : "Startups and founders";
+  }
+
+  if (hasCommunity) {
+    return hasWeb3 ? "DAO, NFT, and Web3 communities" : "Community leads and members";
+  }
+
+  if (hasDeveloper && hasOperator) {
+    return "Developers and internal operators";
+  }
+
+  if (hasDeveloper) {
+    return "Developers and technical teams";
+  }
+
+  if (hasBrand) {
+    return "Brands and growth teams";
+  }
+
+  if (hasOperator) {
+    return "Internal operators and moderators";
+  }
+
+  return undefined;
+}
+
+function inferSuccessSignalsFromHarvest(text: string, template?: WorkspaceTemplate) {
+  const lower = text.toLowerCase();
+  const signals: string[] = [];
+
+  if (
+    template === "content" ||
+    /\bcommunity|telegram|discord|dao|governance|holder|member|members\b/.test(lower)
+  ) {
+    signals.push("Higher weekly active participation from the target community");
+  }
+
+  if (/\bautonom|automate|automation|operate|agents?\b/.test(lower)) {
+    signals.push("More work completed autonomously with less manual operator time");
+  }
+
+  if (/\bgrow|growth|startup|startups|business(?:es)?\b/.test(lower)) {
+    signals.push("More active teams or ventures operating through the workspace");
+  }
+
+  return uniqueStrings(signals).slice(0, 3);
+}
+
+function inferRevenueModelFromHarvest(text: string) {
+  const lower = text.toLowerCase();
+
+  if (/\bsubscription|pricing|plan\b/.test(lower)) {
+    return "Subscription software";
+  }
+
+  if (/\bprofit share|share in company profits|revenue share\b/.test(lower)) {
+    return "Revenue share or profit participation";
+  }
+
+  if (/\bnft holders?\b|\btoken holders?\b|\btoken-gated\b/.test(lower)) {
+    return "Token or membership-gated participation";
+  }
+
+  return undefined;
+}
+
+function looksLikeCustomerSegment(value: string) {
+  const lower = value.toLowerCase();
+
+  if (!lower || lower.split(/\s+/).length > 12) {
+    return false;
+  }
+
+  if (/\b(create|operate|grow|power|launch|build|manage|automate|using|with|through)\b/.test(lower)) {
+    return false;
+  }
+
+  return /\b(user|users|customer|customers|audience|founder|founders|startup|startups|developer|developers|operator|operators|teams?|community|communities|members?|holders?|dao|nft|brand|brands|creator|creators|business|businesses)\b/.test(
+    lower
+  );
+}
+
+function sanitizeHarvestedSegment(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^[\s:,-]+|[\s:,-]+$/g, "")
+    .trim();
+}
+
+function looksLikeGeneratedWorkspaceName(value: string) {
+  const lower = value.toLowerCase();
+  return /\b(yapal[ıi]m|ekleyelim|başlatal[ıi]m|kural[ıi]m|olsun|diyelim|verelim|koyal[ıi]m)\b/.test(lower);
+}
+
+function detectTemplateFromHarvest(value: string): WorkspaceTemplate | undefined {
+  const lower = value.toLowerCase();
+
+  if (/\b(telegram|discord|community|topluluk|content|newsletter|growth|seo)\b/.test(lower)) {
+    return "content";
+  }
+
+  if (/\b(api|backend|service|infrastructure)\b/.test(lower)) {
+    return "backend";
+  }
+
+  if (/\b(app|platform|software|product|dashboard)\b/.test(lower)) {
+    return "software";
+  }
+
+  return undefined;
+}
+
+function extractPreferredMeta(html: string, names: string[]) {
+  for (const name of names) {
+    const value = extractMetaContent(html, name);
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function extractMetaContent(html: string, name: string) {
+  const patterns = [
+    new RegExp(`<meta[^>]+property=["']${escapeRegex(name)}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${escapeRegex(name)}["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+name=["']${escapeRegex(name)}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escapeRegex(name)}["'][^>]*>`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) {
+      return cleanHtmlText(match[1]);
+    }
+  }
+
+  return undefined;
+}
+
+function extractTagText(html: string, tagName: string) {
+  const match = html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"));
+  return match?.[1] ? cleanHtmlText(match[1]) : undefined;
+}
+
+function extractFirstParagraph(html: string) {
+  return extractParagraphs(html)[0];
+}
+
+function extractSecondParagraph(html: string) {
+  return extractParagraphs(html)[1];
+}
+
+function extractParagraphs(html: string) {
+  return Array.from(html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi))
+    .map((match) => cleanHtmlText(match[1]))
+    .filter((entry) => entry.length >= 40)
+    .slice(0, 3);
+}
+
+function cleanBrandName(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.split(/[|:-]/)[0]?.trim();
+  return trimmed && trimmed.length >= 2 ? trimmed : undefined;
+}
+
+function cleanHtmlText(value: string) {
+  return decodeHtmlEntities(value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildCreatedAgentIdMap(plan: WorkspacePlan) {
+  const workspaceSlug = slugify(plan.workspace.name);
+
+  return Object.fromEntries(
+    plan.team.persistentAgents
+      .filter((agent) => agent.enabled)
+      .map((agent) => [agent.id, `${workspaceSlug}-${slugify(agent.id) || "agent"}`])
+  );
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
