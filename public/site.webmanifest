@@ -1,0 +1,23 @@
+{
+  "name": "OpenClaw Mission Control",
+  "short_name": "Mission Control",
+  "description": "A production-grade control surface for live OpenClaw workspaces, agents, models, and runtimes.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09101c",
+  "theme_color": "#09101c",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { ArrowUpCircle, LoaderCircle, MoonStar, RefreshCw, Settings2, SunMedium } from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 
@@ -1093,14 +1094,33 @@ function CanvasTitlePill({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
           : "border-cyan-300/10 bg-slate-950/45"
       )}
     >
-      <p
-        className={cn(
-          "text-[10px] tracking-[0.18em]",
-          surfaceTheme === "light" ? "text-[#8a7261]" : "text-slate-500"
-        )}
-      >
-        AgentOS
-      </p>
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center overflow-hidden rounded-[8px] border",
+            surfaceTheme === "light"
+              ? "border-[#d1bcad] bg-[#f5ece4]"
+              : "border-white/[0.08] bg-white/[0.03]"
+          )}
+        >
+          <Image
+            src="/assets/logo.png"
+            alt="AgentOS logo"
+            width={22}
+            height={22}
+            className="h-[22px] w-[22px] object-contain"
+            draggable={false}
+          />
+        </span>
+        <p
+          className={cn(
+            "text-[10px] tracking-[0.18em]",
+            surfaceTheme === "light" ? "text-[#8a7261]" : "text-slate-500"
+          )}
+        >
+          AgentOS
+        </p>
+      </div>
       <span
         aria-hidden="true"
         className={cn(
@@ -1252,7 +1272,7 @@ function CanvasTopBar({
             role="menu"
             aria-label="OpenClaw settings"
             className={cn(
-              "absolute right-0 top-[calc(100%+12px)] z-[70] max-h-[min(82vh,calc(100svh-96px))] w-[320px] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 shadow-[0_22px_64px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
+              "absolute right-0 top-[calc(100%+12px)] z-[70] max-h-[min(82vh,calc(100svh-96px))] w-[300px] overflow-y-auto overscroll-contain rounded-[20px] border p-3 shadow-[0_22px_64px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
               surfaceTheme === "light"
                 ? "border-[#dbc9bc]/90 bg-[rgba(252,247,241,0.95)] text-[#4a382c] shadow-[0_24px_60px_rgba(161,125,101,0.18)]"
                 : "border-cyan-300/12 bg-[rgba(10,16,28,0.9)] text-slate-100"
@@ -1262,7 +1282,7 @@ function CanvasTopBar({
               <div>
                 <p
                   className={cn(
-                    "text-[9px] uppercase tracking-[0.28em]",
+                    "text-[8px] uppercase tracking-[0.24em]",
                     surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
                   )}
                 >
@@ -1270,7 +1290,7 @@ function CanvasTopBar({
                 </p>
                 <h3
                   className={cn(
-                    "mt-0.5 font-display text-[15px]",
+                    "mt-0.5 font-display text-[14px]",
                     surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
                   )}
                 >
@@ -1279,7 +1299,7 @@ function CanvasTopBar({
               </div>
               <span
                 className={cn(
-                  "rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.22em]",
+                  "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
                   surfaceTheme === "light"
                     ? "border-[#d6c0b0] bg-[#f3e7dc] text-[#8a7261]"
                     : "border-white/10 bg-white/[0.06] text-slate-400"
@@ -1292,7 +1312,7 @@ function CanvasTopBar({
             {snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion ? (
               <div
                 className={cn(
-                  "mt-3 rounded-[20px] border px-3.5 py-3.5",
+                  "mt-2.5 rounded-[18px] border px-3 py-3",
                   surfaceTheme === "light"
                     ? "border-amber-300/90 bg-[linear-gradient(135deg,rgba(255,247,237,0.98),rgba(252,231,214,0.94))] shadow-[0_16px_36px_rgba(194,120,55,0.16)]"
                     : "border-amber-300/30 bg-[linear-gradient(135deg,rgba(71,35,8,0.62),rgba(33,20,8,0.82))] shadow-[0_18px_42px_rgba(245,158,11,0.14)]"
@@ -1302,7 +1322,7 @@ function CanvasTopBar({
                   <div>
                     <p
                       className={cn(
-                        "text-[9px] uppercase tracking-[0.24em]",
+                        "text-[8px] uppercase tracking-[0.18em]",
                         surfaceTheme === "light" ? "text-amber-800/70" : "text-amber-200/80"
                       )}
                     >
@@ -1311,7 +1331,7 @@ function CanvasTopBar({
                     <div className="mt-1.5 flex items-baseline gap-1.5">
                       <p
                         className={cn(
-                          "font-display text-[1.08rem]",
+                          "font-display text-[0.98rem]",
                           surfaceTheme === "light" ? "text-amber-950" : "text-amber-50"
                         )}
                       >
@@ -1319,7 +1339,7 @@ function CanvasTopBar({
                       </p>
                       <p
                         className={cn(
-                          "text-[10px]",
+                          "text-[9px]",
                           surfaceTheme === "light" ? "text-amber-900/70" : "text-amber-100/70"
                         )}
                       >
@@ -1336,7 +1356,7 @@ function CanvasTopBar({
                 </div>
                 <p
                   className={cn(
-                    "mt-2 text-[11px] leading-[1.15rem]",
+                    "mt-1.5 text-[10px] leading-[1.05rem]",
                     surfaceTheme === "light" ? "text-amber-950/80" : "text-amber-50/85"
                   )}
                 >
@@ -1346,7 +1366,7 @@ function CanvasTopBar({
                   type="button"
                   onClick={onOpenUpdateDialog}
                   className={cn(
-                    "mt-3 inline-flex items-center justify-center rounded-[14px] border px-2.5 py-1.5 text-[10px] uppercase tracking-[0.22em] transition-colors",
+                    "mt-2.5 inline-flex items-center justify-center rounded-[12px] border px-2.5 py-1 text-[9px] uppercase tracking-[0.18em] transition-colors",
                     surfaceTheme === "light"
                       ? "border-amber-400/90 bg-amber-900 text-amber-50 hover:bg-amber-800"
                       : "border-amber-300/40 bg-amber-300/18 text-amber-100 hover:bg-amber-300/24"
@@ -1359,7 +1379,7 @@ function CanvasTopBar({
 
             <div
               className={cn(
-                "mt-3 rounded-[18px] border px-3 py-2.5",
+                "mt-2.5 rounded-[16px] border px-2.5 py-2",
                 surfaceTheme === "light"
                   ? "border-[#e6d7cb] bg-[#fffaf6]"
                   : "border-white/8 bg-white/[0.03]"
@@ -1367,7 +1387,7 @@ function CanvasTopBar({
             >
               <p
                 className={cn(
-                  "text-[9px] uppercase tracking-[0.22em]",
+                  "text-[8px] uppercase tracking-[0.18em]",
                   surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
                 )}
               >
@@ -1376,7 +1396,7 @@ function CanvasTopBar({
               <div className="mt-1.5 flex items-center justify-between gap-2">
                 <p
                   className={cn(
-                    "font-display text-[0.94rem]",
+                    "font-display text-[0.88rem]",
                     surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
                   )}
                 >
@@ -1385,7 +1405,7 @@ function CanvasTopBar({
                 {snapshot.diagnostics.updateChannel ? (
                   <span
                     className={cn(
-                      "rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.2em]",
+                      "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
                       surfaceTheme === "light"
                         ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
                         : "border-cyan-400/14 bg-cyan-400/8 text-cyan-100"
@@ -1397,7 +1417,7 @@ function CanvasTopBar({
               </div>
               <p
                 className={cn(
-                  "mt-1.5 text-[11px] leading-[1.15rem]",
+                  "mt-1.5 text-[10px] leading-[1.05rem]",
                   surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
                 )}
               >
@@ -1408,7 +1428,7 @@ function CanvasTopBar({
 
             <div
               className={cn(
-                "mt-2.5 rounded-[18px] border px-3 py-3",
+                "mt-2 rounded-[16px] border px-2.5 py-2.5",
                 surfaceTheme === "light"
                   ? "border-[#e6d7cb] bg-[#fffaf6]"
                   : "border-white/8 bg-white/[0.03]"
@@ -1418,13 +1438,13 @@ function CanvasTopBar({
                 <div>
                   <Label
                     htmlFor="workspace-root"
-                    className={surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"}
+                    className={cn("text-[11px]", surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500")}
                   >
                     Workspace root
                   </Label>
                   <p
                     className={cn(
-                      "mt-1 text-[11px] leading-[1.15rem]",
+                      "mt-0.5 text-[10px] leading-[1.05rem]",
                       surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
                     )}
                   >
@@ -1433,7 +1453,7 @@ function CanvasTopBar({
                 </div>
                 <span
                   className={cn(
-                    "rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.2em]",
+                    "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
                     surfaceTheme === "light"
                       ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
                       : "border-white/10 bg-white/[0.05] text-slate-300"
@@ -1450,7 +1470,7 @@ function CanvasTopBar({
                 disabled={isSavingWorkspaceRoot}
                 style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
                 className={cn(
-                  "mt-3 h-10 rounded-[16px] px-3 text-[12px]",
+                  "mt-2.5 h-9 rounded-[14px] px-2.5 text-[11px]",
                   surfaceTheme === "light"
                     ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
                     : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
@@ -1458,7 +1478,7 @@ function CanvasTopBar({
               />
               <p
                 className={cn(
-                  "mt-2 break-all font-mono text-[10px] leading-[1.1rem]",
+                  "mt-1.5 break-all font-mono text-[9px] leading-[1rem]",
                   surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
                 )}
               >
@@ -1466,7 +1486,7 @@ function CanvasTopBar({
               </p>
               <p
                 className={cn(
-                  "mt-1 break-all font-mono text-[10px] leading-[1.1rem]",
+                  "mt-1 break-all font-mono text-[9px] leading-[1rem]",
                   surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
                 )}
               >
@@ -1482,7 +1502,7 @@ function CanvasTopBar({
                     void onSaveWorkspaceRootSettings(null);
                   }}
                   className={cn(
-                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
                     surfaceTheme === "light"
                       ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
                       : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
@@ -1498,7 +1518,7 @@ function CanvasTopBar({
                     void onSaveWorkspaceRootSettings(workspaceRootDraft);
                   }}
                   className={cn(
-                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
                     surfaceTheme === "light"
                       ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
                       : ""
@@ -1518,7 +1538,7 @@ function CanvasTopBar({
 
             <div
               className={cn(
-                "mt-2.5 rounded-[18px] border px-3 py-3",
+                "mt-2 rounded-[16px] border px-2.5 py-2.5",
                 surfaceTheme === "light"
                   ? "border-[#e6d7cb] bg-[#fffaf6]"
                   : "border-white/8 bg-white/[0.03]"
@@ -1528,13 +1548,13 @@ function CanvasTopBar({
                 <div>
                   <Label
                     htmlFor="gateway-url"
-                    className={surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"}
+                    className={cn("text-[11px]", surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500")}
                   >
                     OpenClaw gateway
                   </Label>
                   <p
                     className={cn(
-                      "mt-1 text-[11px] leading-[1.15rem]",
+                      "mt-0.5 text-[10px] leading-[1.05rem]",
                       surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
                     )}
                   >
@@ -1543,7 +1563,7 @@ function CanvasTopBar({
                 </div>
                 <span
                   className={cn(
-                    "rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.2em]",
+                    "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
                     surfaceTheme === "light"
                       ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
                       : "border-white/10 bg-white/[0.05] text-slate-300"
@@ -1561,7 +1581,7 @@ function CanvasTopBar({
                 disabled={isSavingGateway}
                 style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
                 className={cn(
-                  "mt-3 h-10 rounded-[16px] px-3 text-[12px]",
+                  "mt-2.5 h-9 rounded-[14px] px-2.5 text-[11px]",
                   surfaceTheme === "light"
                     ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
                     : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
@@ -1570,7 +1590,7 @@ function CanvasTopBar({
 
               <p
                 className={cn(
-                  "mt-2 break-all font-mono text-[10px] leading-[1.1rem]",
+                  "mt-1.5 break-all font-mono text-[9px] leading-[1rem]",
                   surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
                 )}
               >
@@ -1578,7 +1598,7 @@ function CanvasTopBar({
               </p>
               <p
                 className={cn(
-                  "mt-1 break-all font-mono text-[10px] leading-[1.1rem]",
+                  "mt-1 break-all font-mono text-[9px] leading-[1rem]",
                   surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
                 )}
               >
@@ -1595,7 +1615,7 @@ function CanvasTopBar({
                     void onSaveGatewaySettings(null);
                   }}
                   className={cn(
-                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
                     surfaceTheme === "light"
                       ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
                       : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
@@ -1611,7 +1631,7 @@ function CanvasTopBar({
                     void onSaveGatewaySettings(gatewayDraft);
                   }}
                   className={cn(
-                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
                     surfaceTheme === "light"
                       ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
                       : ""
@@ -1637,7 +1657,7 @@ function CanvasTopBar({
               }}
               disabled={isCheckingForUpdates}
               className={cn(
-                "mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-[15px] border px-3 py-2.5 text-[10px] uppercase tracking-[0.24em] transition-colors disabled:cursor-wait disabled:opacity-70",
+                "mt-2.5 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[13px] border px-3 text-[9px] uppercase tracking-[0.18em] transition-colors disabled:cursor-wait disabled:opacity-70",
                 snapshot.diagnostics.updateAvailable
                   ? surfaceTheme === "light"
                     ? "border-amber-400/90 bg-amber-100 text-amber-900 hover:bg-amber-200"
@@ -1662,7 +1682,7 @@ function CanvasTopBar({
             {lastCheckedAt ? (
               <p
                 className={cn(
-                  "mt-2.5 text-center text-[10px]",
+                  "mt-2 text-center text-[9px]",
                   surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
                 )}
               >
