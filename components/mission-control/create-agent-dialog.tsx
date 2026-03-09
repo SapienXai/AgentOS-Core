@@ -65,6 +65,7 @@ export function CreateAgentDialog({
   onAgentCreated?: (agentId: string) => void;
   trigger: ReactNode;
 }) {
+  const [isMounted, setIsMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -90,6 +91,10 @@ export function CreateAgentDialog({
   const canSubmit =
     Boolean(normalizedAgentId && draft.workspaceId) && !isSaving && existingAgentCollision === null;
   const showHeartbeatControls = isAdvancedOpen || draft.policy.preset === "monitoring";
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -153,6 +158,10 @@ export function CreateAgentDialog({
       setIsSaving(false);
     }
   };
+
+  if (!isMounted) {
+    return <>{trigger}</>;
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

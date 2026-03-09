@@ -40,6 +40,7 @@ export interface GatewayDiagnostics {
   updateInstallKind?: string;
   updatePackageManager?: string;
   workspaceRoot: string;
+  configuredWorkspaceRoot: string | null;
   dashboardUrl: string;
   gatewayUrl: string;
   configuredGatewayUrl: string | null;

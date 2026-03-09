@@ -39,6 +39,7 @@ import type {
   WorkspaceTeamPreset,
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
+import { compactPath } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 const wizardSteps = [
@@ -283,7 +284,15 @@ export function WorkspaceCreateDialog({
                 <Badge variant="muted">{sourceMode}</Badge>
                 <Badge variant="muted">{teamPreset}</Badge>
               </div>
-              <p className="mt-3 text-xs text-slate-400">{workspacePathPreview(draft.name, draft.directory, sourceMode, draft.existingPath)}</p>
+              <p className="mt-3 text-xs text-slate-400">
+                {workspacePathPreview(
+                  snapshot.diagnostics.workspaceRoot,
+                  draft.name,
+                  draft.directory,
+                  sourceMode,
+                  draft.existingPath
+                )}
+              </p>
             </div>
           </aside>
 
@@ -330,6 +339,7 @@ export function WorkspaceCreateDialog({
 
             {step === 3 ? (
               <ReviewStep
+                snapshot={snapshot}
                 draft={draft}
                 agents={agents}
                 rules={rules}
@@ -721,12 +731,14 @@ function RulesStep({
 }
 
 function ReviewStep({
+  snapshot,
   draft,
   agents,
   rules,
   scaffoldFiles,
   scaffoldFolders
 }: {
+  snapshot: MissionControlSnapshot;
   draft: WorkspaceCreateInput;
   agents: WorkspaceAgentBlueprintInput[];
   rules: typeof DEFAULT_WORKSPACE_RULES;
@@ -745,7 +757,15 @@ function ReviewStep({
 
       <div className="grid gap-3 lg:grid-cols-2">
         <SummaryCard title="Workspace" value={draft.name?.trim() || "Untitled workspace"}>
-          <p>{workspacePathPreview(draft.name, draft.directory, draft.sourceMode ?? "empty", draft.existingPath)}</p>
+          <p>
+            {workspacePathPreview(
+              snapshot.diagnostics.workspaceRoot,
+              draft.name,
+              draft.directory,
+              draft.sourceMode ?? "empty",
+              draft.existingPath
+            )}
+          </p>
           <p>Template: {draft.template ?? "software"}</p>
           <p>Source: {draft.sourceMode ?? "empty"}</p>
         </SummaryCard>
@@ -995,6 +1015,7 @@ function createInitialDraft(): WorkspaceCreateInput {
 }
 
 function workspacePathPreview(
+  workspaceRoot: string,
   name: string | undefined,
   directory: string | undefined,
   sourceMode: WorkspaceSourceMode,
@@ -1013,5 +1034,5 @@ function workspacePathPreview(
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-  return `~/Documents/Shared/projects/${slug || "workspace"}`;
+  return `${compactPath(workspaceRoot)}/${slug || "workspace"}`;
 }

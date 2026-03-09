@@ -158,7 +158,14 @@ type AgentConfigPayload = Array<{
   };
   default?: boolean;
 }>;
+
+const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
+const missionControlRootPath = path.join(process.cwd(), ".mission-control");
+const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
 type MutableAgentConfigEntry = AgentConfigPayload[number] & Record<string, unknown>;
+type MissionControlSettings = {
+  workspaceRoot?: string;
+};
 
 type ModelsPayload = {
   models: Array<{
@@ -345,6 +352,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
   }
 
   try {
+    const configuredWorkspaceRoot = await getConfiguredWorkspaceRoot();
     const [
       gatewayStatusResult,
       gatewayRemoteUrlResult,
@@ -356,7 +364,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       presenceResult
     ] = await Promise.allSettled([
       runOpenClawJson<GatewayStatusPayload>(["gateway", "status", "--json"]),
-      runOpenClawJson<string>(["config", "get", "gateway.remote.url", "--json"]),
+      runOpenClawJson<string>(["config", "get", GATEWAY_REMOTE_URL_CONFIG_KEY, "--json"]),
       runOpenClawJson<StatusPayload>(["status", "--json"]),
       runOpenClawJson<AgentPayload>(["agents", "list", "--json"]),
       runOpenClawJson<AgentConfigPayload>(["config", "get", "agents.list", "--json"]),
@@ -633,7 +641,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       updateRoot: normalizeOptionalValue(status?.update?.root ?? undefined),
       updateInstallKind: normalizeOptionalValue(status?.update?.installKind ?? undefined),
       updatePackageManager: normalizeOptionalValue(status?.update?.packageManager ?? undefined),
-      workspaceRoot: resolveWorkspaceRoot(),
+      workspaceRoot: resolveWorkspaceRoot(configuredWorkspaceRoot),
+      configuredWorkspaceRoot: configuredWorkspaceRoot ?? null,
       dashboardUrl: `http://127.0.0.1:${gatewayStatus?.gateway?.port ?? 18789}/`,
       gatewayUrl: gatewayStatus?.gateway?.probeUrl || "ws://127.0.0.1:18789",
       configuredGatewayUrl: configuredGatewayUrl ?? null,
@@ -1146,7 +1155,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
 
 export async function createWorkspaceProject(input: WorkspaceCreateInput): Promise<WorkspaceCreateResult> {
   const normalized = resolveWorkspaceBootstrapInput(input);
-  const targetDir = resolveWorkspaceCreationTargetDir(normalized);
+  const targetDir = await resolveWorkspaceCreationTargetDir(normalized);
   const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const enabledAgents = normalized.agents.filter((agent) => agent.enabled);
 
@@ -1332,10 +1341,23 @@ export async function updateGatewayRemoteUrl(input: { gatewayUrl?: string | null
   const gatewayUrl = normalizeGatewayRemoteUrl(input.gatewayUrl);
 
   if (gatewayUrl) {
-    await runOpenClaw(["config", "set", "gateway.remote.url", gatewayUrl]);
+    await runOpenClaw(["config", "set", GATEWAY_REMOTE_URL_CONFIG_KEY, gatewayUrl]);
   } else if (await hasGatewayRemoteUrlConfig()) {
-    await runOpenClaw(["config", "unset", "gateway.remote.url"]);
+    await runOpenClaw(["config", "unset", GATEWAY_REMOTE_URL_CONFIG_KEY]);
   }
+
+  snapshotCache = null;
+  runtimeHistoryCache = new Map();
+
+  return getMissionControlSnapshot({ force: true });
+}
+
+export async function updateWorkspaceRoot(input: { workspaceRoot?: string | null }) {
+  const workspaceRoot = normalizeWorkspaceRoot(input.workspaceRoot);
+
+  await writeMissionControlSettings({
+    workspaceRoot: workspaceRoot ?? undefined
+  });
 
   snapshotCache = null;
   runtimeHistoryCache = new Map();
@@ -1370,9 +1392,48 @@ function normalizeGatewayRemoteUrl(value: string | null | undefined) {
   return parsed.toString().replace(/\/$/, "");
 }
 
+function normalizeWorkspaceRoot(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed !== "~" && !trimmed.startsWith("~/") && !path.isAbsolute(trimmed)) {
+    throw new Error("Workspace root must be an absolute path or start with ~/.");
+  }
+
+  return normalizeConfiguredWorkspaceRootValue(trimmed);
+}
+
+function normalizeConfiguredWorkspaceRootValue(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const expanded = expandHomeRelativePath(trimmed);
+  const normalized = path.normalize(expanded);
+
+  return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
+}
+
+function expandHomeRelativePath(value: string) {
+  if (value === "~") {
+    return os.homedir();
+  }
+
+  if (value.startsWith("~/")) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+
+  return value;
+}
+
 async function hasGatewayRemoteUrlConfig() {
   try {
-    await runOpenClaw(["config", "get", "gateway.remote.url", "--json"]);
+    await runOpenClaw(["config", "get", GATEWAY_REMOTE_URL_CONFIG_KEY, "--json"]);
     return true;
   } catch (error) {
     const detail = stringifyCommandFailure(error);
@@ -1383,6 +1444,44 @@ async function hasGatewayRemoteUrlConfig() {
 
     throw error;
   }
+}
+
+async function getConfiguredWorkspaceRoot() {
+  const settings = await readMissionControlSettings();
+  return normalizeConfiguredWorkspaceRootValue(settings.workspaceRoot) ?? null;
+}
+
+async function readMissionControlSettings(): Promise<MissionControlSettings> {
+  let raw: string;
+
+  try {
+    raw = await readFile(missionControlSettingsPath, "utf8");
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
+
+    if (code === "ENOENT") {
+      return {};
+    }
+
+    throw error;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const workspaceRoot =
+      typeof parsed.workspaceRoot === "string"
+        ? normalizeConfiguredWorkspaceRootValue(parsed.workspaceRoot)
+        : undefined;
+
+    return workspaceRoot ? { workspaceRoot } : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeMissionControlSettings(settings: MissionControlSettings) {
+  await mkdir(missionControlRootPath, { recursive: true });
+  await writeFile(missionControlSettingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
 function stringifyCommandFailure(error: unknown) {
@@ -1832,7 +1931,9 @@ function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWo
   };
 }
 
-function resolveWorkspaceCreationTargetDir(input: ResolvedWorkspaceBootstrapInput) {
+async function resolveWorkspaceCreationTargetDir(input: ResolvedWorkspaceBootstrapInput) {
+  const workspaceRoot = resolveWorkspaceRoot(await getConfiguredWorkspaceRoot());
+
   if (input.sourceMode === "existing") {
     const existingPath = input.existingPath || input.directory;
 
@@ -1846,10 +1947,10 @@ function resolveWorkspaceCreationTargetDir(input: ResolvedWorkspaceBootstrapInpu
   if (input.directory) {
     return path.isAbsolute(input.directory)
       ? input.directory
-      : path.join(resolveWorkspaceRoot(), input.directory);
+      : path.join(workspaceRoot, input.directory);
   }
 
-  return path.join(resolveWorkspaceRoot(), input.slug);
+  return path.join(workspaceRoot, input.slug);
 }
 
 async function ensureFreshWorkspaceDirectory(targetDir: string) {
@@ -4088,9 +4189,12 @@ function resolveAgentForMission(snapshot: MissionControlSnapshot, workspaceId?: 
   );
 }
 
-function resolveWorkspaceRoot() {
-  const sharedProjectsRoot = path.join(os.homedir(), "Documents", "Shared", "projects");
-  return sharedProjectsRoot;
+function resolveDefaultWorkspaceRoot() {
+  return path.join(os.homedir(), "Documents", "Shared", "projects");
+}
+
+function resolveWorkspaceRoot(configuredWorkspaceRoot?: string | null) {
+  return configuredWorkspaceRoot || resolveDefaultWorkspaceRoot();
 }
 
 async function ensurePathAvailable(targetPath: string, currentPath: string) {

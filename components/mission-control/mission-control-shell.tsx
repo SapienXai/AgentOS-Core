@@ -82,7 +82,9 @@ export function MissionControlShell({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
   const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
+  const [workspaceRootDraft, setWorkspaceRootDraft] = useState(() => resolveWorkspaceRootDraft(initialSnapshot));
   const [isSavingGateway, setIsSavingGateway] = useState(false);
+  const [isSavingWorkspaceRoot, setIsSavingWorkspaceRoot] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [updateRunState, setUpdateRunState] = useState<UpdateRunState>("idle");
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
@@ -174,12 +176,13 @@ export function MissionControlShell({
   }, [surfaceTheme]);
 
   useEffect(() => {
-    if (isSettingsOpen || isSavingGateway) {
+    if (isSettingsOpen || isSavingGateway || isSavingWorkspaceRoot) {
       return;
     }
 
     setGatewayDraft(resolveGatewayDraft(snapshot));
-  }, [snapshot, isSettingsOpen, isSavingGateway]);
+    setWorkspaceRootDraft(resolveWorkspaceRootDraft(snapshot));
+  }, [snapshot, isSettingsOpen, isSavingGateway, isSavingWorkspaceRoot]);
 
   useEffect(() => {
     if (isOpenClawReady) {
@@ -599,6 +602,43 @@ export function MissionControlShell({
     }
   };
 
+  const saveWorkspaceRootSettings = async (nextWorkspaceRoot: string | null) => {
+    setIsSavingWorkspaceRoot(true);
+
+    try {
+      const response = await fetch("/api/settings/workspace-root", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          workspaceRoot: nextWorkspaceRoot
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "Workspace root could not be updated.");
+      }
+
+      const result = (await response.json()) as { snapshot: MissionControlSnapshot };
+      setSnapshot(result.snapshot);
+      setWorkspaceRootDraft(resolveWorkspaceRootDraft(result.snapshot));
+
+      toast.success("Workspace root updated.", {
+        description: nextWorkspaceRoot?.trim()
+          ? `New workspaces will default to ${compactPath(result.snapshot.diagnostics.workspaceRoot)}. Existing workspaces stay where they are.`
+          : "Mission Control reverted to the default workspace root. Existing workspaces were not moved."
+      });
+    } catch (error) {
+      toast.error("Workspace root update failed.", {
+        description: error instanceof Error ? error.message : "Unable to update the default workspace root."
+      });
+    } finally {
+      setIsSavingWorkspaceRoot(false);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -685,7 +725,9 @@ export function MissionControlShell({
           settingsRef={settingsRef}
           isSettingsOpen={isSettingsOpen}
           gatewayDraft={gatewayDraft}
+          workspaceRootDraft={workspaceRootDraft}
           isSavingGateway={isSavingGateway}
+          isSavingWorkspaceRoot={isSavingWorkspaceRoot}
           isCheckingForUpdates={isCheckingForUpdates}
           lastCheckedAt={lastCheckedAt}
           onToggleTheme={() =>
@@ -693,7 +735,9 @@ export function MissionControlShell({
           }
           onToggleSettings={() => setIsSettingsOpen((current) => !current)}
           onGatewayDraftChange={setGatewayDraft}
+          onWorkspaceRootDraftChange={setWorkspaceRootDraft}
           onSaveGatewaySettings={saveGatewaySettings}
+          onSaveWorkspaceRootSettings={saveWorkspaceRootSettings}
           onCheckForUpdates={checkForUpdates}
           onOpenUpdateDialog={() => {
             resetUpdateDialogState();
@@ -1082,13 +1126,17 @@ function CanvasTopBar({
   settingsRef,
   isSettingsOpen,
   gatewayDraft,
+  workspaceRootDraft,
   isSavingGateway,
+  isSavingWorkspaceRoot,
   isCheckingForUpdates,
   lastCheckedAt,
   onToggleTheme,
   onToggleSettings,
   onGatewayDraftChange,
+  onWorkspaceRootDraftChange,
   onSaveGatewaySettings,
+  onSaveWorkspaceRootSettings,
   onCheckForUpdates,
   onOpenUpdateDialog
 }: {
@@ -1097,13 +1145,17 @@ function CanvasTopBar({
   settingsRef: MutableRefObject<HTMLDivElement | null>;
   isSettingsOpen: boolean;
   gatewayDraft: string;
+  workspaceRootDraft: string;
   isSavingGateway: boolean;
+  isSavingWorkspaceRoot: boolean;
   isCheckingForUpdates: boolean;
   lastCheckedAt: number | null;
   onToggleTheme: () => void;
   onToggleSettings: () => void;
   onGatewayDraftChange: (value: string) => void;
+  onWorkspaceRootDraftChange: (value: string) => void;
   onSaveGatewaySettings: (value: string | null) => Promise<void>;
+  onSaveWorkspaceRootSettings: (value: string | null) => Promise<void>;
   onCheckForUpdates: () => Promise<void>;
   onOpenUpdateDialog: () => void;
 }) {
@@ -1356,36 +1408,112 @@ function CanvasTopBar({
 
             <div
               className={cn(
-                "mt-2.5 rounded-[18px] border px-3 py-2.5",
+                "mt-2.5 rounded-[18px] border px-3 py-3",
                 surfaceTheme === "light"
                   ? "border-[#e6d7cb] bg-[#fffaf6]"
                   : "border-white/8 bg-white/[0.03]"
               )}
             >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <Label
+                    htmlFor="workspace-root"
+                    className={surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"}
+                  >
+                    Workspace root
+                  </Label>
+                  <p
+                    className={cn(
+                      "mt-1 text-[11px] leading-[1.15rem]",
+                      surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+                    )}
+                  >
+                    Default parent path for newly created workspaces. Existing workspaces stay at their current paths.
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.2em]",
+                    surfaceTheme === "light"
+                      ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
+                      : "border-white/10 bg-white/[0.05] text-slate-300"
+                  )}
+                >
+                  New only
+                </span>
+              </div>
+              <Input
+                id="workspace-root"
+                value={workspaceRootDraft}
+                onChange={(event) => onWorkspaceRootDraftChange(event.target.value)}
+                placeholder="~/Documents/Shared/projects"
+                disabled={isSavingWorkspaceRoot}
+                style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
+                className={cn(
+                  "mt-3 h-10 rounded-[16px] px-3 text-[12px]",
+                  surfaceTheme === "light"
+                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
+                    : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
+                )}
+              />
               <p
                 className={cn(
-                  "text-[9px] uppercase tracking-[0.22em]",
-                  surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+                  "mt-2 break-all font-mono text-[10px] leading-[1.1rem]",
+                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
                 )}
               >
-                Workspace root
+                Configured root: {snapshot.diagnostics.configuredWorkspaceRoot ? compactPath(snapshot.diagnostics.configuredWorkspaceRoot) : "default"}
               </p>
               <p
                 className={cn(
-                  "mt-1.5 break-all font-mono text-[10px] leading-[1.1rem]",
-                  surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                  "mt-1 break-all font-mono text-[10px] leading-[1.1rem]",
+                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
                 )}
               >
-                {compactPath(snapshot.diagnostics.workspaceRoot)}
+                Effective root: {compactPath(snapshot.diagnostics.workspaceRoot)}
               </p>
-              <p
-                className={cn(
-                  "mt-1.5 text-[11px] leading-[1.15rem]",
-                  surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
-                )}
-              >
-                Newly created workspaces are stored under this default parent path.
-              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={isSavingWorkspaceRoot}
+                  onClick={() => {
+                    void onSaveWorkspaceRootSettings(null);
+                  }}
+                  className={cn(
+                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    surfaceTheme === "light"
+                      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
+                      : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
+                  )}
+                >
+                  Use default
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isSavingWorkspaceRoot}
+                  onClick={() => {
+                    void onSaveWorkspaceRootSettings(workspaceRootDraft);
+                  }}
+                  className={cn(
+                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    surfaceTheme === "light"
+                      ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                      : ""
+                  )}
+                >
+                  {isSavingWorkspaceRoot ? (
+                    <>
+                      <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save root"
+                  )}
+                </Button>
+              </div>
             </div>
 
             <div
@@ -1575,6 +1703,10 @@ function formatGatewayDraft(gatewayUrl: string) {
 
 function resolveGatewayDraft(snapshot: MissionControlSnapshot) {
   return formatGatewayDraft(snapshot.diagnostics.configuredGatewayUrl || snapshot.diagnostics.gatewayUrl);
+}
+
+function resolveWorkspaceRootDraft(snapshot: MissionControlSnapshot) {
+  return compactPath(snapshot.diagnostics.configuredWorkspaceRoot || snapshot.diagnostics.workspaceRoot);
 }
 
 function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
