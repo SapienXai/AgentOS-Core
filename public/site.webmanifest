@@ -1,7 +1,7 @@
 {
-  "name": "OpenClaw Mission Control",
-  "short_name": "Mission Control",
-  "description": "A production-grade control surface for live OpenClaw workspaces, agents, models, and runtimes.",
+  "name": "AgentOS | OpenClaw Mission Control",
+  "short_name": "AgentOS",
+  "description": "Human Control Layer for AI Agents and Companies | Built on OpenClaw.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#09101c",
