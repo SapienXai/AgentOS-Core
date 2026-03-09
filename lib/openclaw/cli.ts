@@ -10,6 +10,8 @@ const execFileAsync = promisify(execFile);
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
 const isWindows = process.platform === "win32";
 let resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
+let resolveOpenClawBinPromise: Promise<string> | null = null;
+let npmGlobalPrefixPromise: Promise<string> | null = null;
 
 interface CommandOptions {
   timeoutMs?: number;
@@ -67,20 +69,38 @@ export async function detectOpenClaw(): Promise<boolean> {
 }
 
 export async function resolveOpenClawBin(): Promise<string> {
-  const candidates = await collectOpenClawCandidates();
-
-  for (const candidate of candidates) {
-    if (await canExecuteOpenClaw(candidate)) {
-      resolvedOpenClawBin = candidate;
-      return candidate;
-    }
+  if (resolvedOpenClawBin) {
+    return resolvedOpenClawBin;
   }
 
-  throw new Error("OpenClaw CLI is not installed or could not be resolved.");
+  if (resolveOpenClawBinPromise) {
+    return resolveOpenClawBinPromise;
+  }
+
+  resolveOpenClawBinPromise = (async () => {
+    const candidates = await collectOpenClawCandidates();
+
+    for (const candidate of candidates) {
+      if (await canExecuteOpenClaw(candidate)) {
+        resolvedOpenClawBin = candidate;
+        return candidate;
+      }
+    }
+
+    throw new Error("OpenClaw CLI is not installed or could not be resolved.");
+  })();
+
+  try {
+    return await resolveOpenClawBinPromise;
+  } finally {
+    resolveOpenClawBinPromise = null;
+  }
 }
 
 export function resetOpenClawBinCache() {
   resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
+  resolveOpenClawBinPromise = null;
+  npmGlobalPrefixPromise = null;
 }
 
 function parseJsonOutput<T>(text: string): T {
@@ -184,17 +204,23 @@ async function canExecuteOpenClaw(command: string) {
 }
 
 async function resolveNpmGlobalPrefix() {
-  try {
-    const { stdout } = await execFileAsync(isWindows ? "npm.cmd" : "npm", ["prefix", "-g"], {
-      cwd: process.cwd(),
-      timeout: 5000,
-      maxBuffer: 1024 * 1024
-    });
+  if (!npmGlobalPrefixPromise) {
+    npmGlobalPrefixPromise = (async () => {
+      try {
+        const { stdout } = await execFileAsync(isWindows ? "npm.cmd" : "npm", ["prefix", "-g"], {
+          cwd: process.cwd(),
+          timeout: 5000,
+          maxBuffer: 1024 * 1024
+        });
 
-    return stdout.toString().trim();
-  } catch {
-    return "";
+        return stdout.toString().trim();
+      } catch {
+        return "";
+      }
+    })();
   }
+
+  return npmGlobalPrefixPromise;
 }
 
 function isNonEmptyString(value: string | null | undefined): value is string {

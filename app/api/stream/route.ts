@@ -8,13 +8,34 @@ const encoder = new TextEncoder();
 export async function GET(request: Request) {
   let interval: ReturnType<typeof setInterval> | undefined;
   let closed = false;
+  let snapshotTask: Promise<void> | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
+      const handleAbort = () => {
+        close();
+      };
+
       const cleanup = () => {
         if (interval) {
           clearInterval(interval);
           interval = undefined;
+        }
+
+        request.signal.removeEventListener("abort", handleAbort);
+      };
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (closed) {
+          return false;
+        }
+
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          return true;
+        } catch {
+          close();
+          return false;
         }
       };
 
@@ -33,24 +54,6 @@ export async function GET(request: Request) {
         }
       };
 
-      const sendEvent = (event: string, data: unknown) => {
-        if (closed) {
-          return false;
-        }
-
-        try {
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-          return true;
-        } catch {
-          close();
-          return false;
-        }
-      };
-
-      const handleAbort = () => {
-        close();
-      };
-
       request.signal.addEventListener("abort", handleAbort);
 
       const sendSnapshot = async () => {
@@ -58,14 +61,24 @@ export async function GET(request: Request) {
           return;
         }
 
-        try {
-          const snapshot = await getMissionControlSnapshot({ force: true });
-          sendEvent("snapshot", snapshot);
-        } catch (error) {
-          sendEvent("error", {
-            error: error instanceof Error ? error.message : "Unknown stream error."
-          });
+        if (snapshotTask) {
+          return snapshotTask;
         }
+
+        snapshotTask = (async () => {
+          try {
+            const snapshot = await getMissionControlSnapshot({ force: true });
+            sendEvent("snapshot", snapshot);
+          } catch (error) {
+            sendEvent("error", {
+              error: error instanceof Error ? error.message : "Unknown stream error."
+            });
+          } finally {
+            snapshotTask = null;
+          }
+        })();
+
+        return snapshotTask;
       };
 
       await sendSnapshot();

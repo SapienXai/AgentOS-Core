@@ -296,18 +296,52 @@ type TranscriptTurn = {
   warningSummary: string | null;
 };
 
-let snapshotCache: { snapshot: MissionControlSnapshot; expiresAt: number } | null = null;
+const SNAPSHOT_CACHE_TTL_MS = 10_000;
+
+type SnapshotPair = {
+  visible: MissionControlSnapshot;
+  full: MissionControlSnapshot;
+};
+
+type SnapshotCacheEntry = SnapshotPair & {
+  expiresAt: number;
+};
+
+let snapshotCache: SnapshotCacheEntry | null = null;
+let snapshotPromise: Promise<SnapshotPair> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 
 export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
   if (!options.force && snapshotCache && snapshotCache.expiresAt > Date.now()) {
-    return snapshotCache.snapshot;
+    return options.includeHidden ? snapshotCache.full : snapshotCache.visible;
   }
 
+  if (snapshotPromise) {
+    const pending = await snapshotPromise;
+    return options.includeHidden ? pending.full : pending.visible;
+  }
+
+  snapshotPromise = loadMissionControlSnapshots();
+
+  try {
+    const nextSnapshot = await snapshotPromise;
+
+    snapshotCache = {
+      ...nextSnapshot,
+      expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS
+    };
+
+    return options.includeHidden ? nextSnapshot.full : nextSnapshot.visible;
+  } finally {
+    snapshotPromise = null;
+  }
+}
+
+async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
   const openclawInstalled = await detectOpenClaw();
 
   if (!openclawInstalled) {
-    return createFallbackSnapshot("OpenClaw CLI is not installed on this machine.");
+    return createSnapshotPair(createFallbackSnapshot("OpenClaw CLI is not installed on this machine."));
   }
 
   try {
@@ -513,21 +547,17 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
         .filter((workspace) => manifestByWorkspace.get(workspace.path)?.hidden)
         .map((workspace) => workspace.id)
     );
-    const visibleAgents = options.includeHidden
-      ? agents
-      : agents.filter((agent) => !hiddenWorkspaceIds.has(agent.workspaceId));
+    const visibleAgents = agents.filter((agent) => !hiddenWorkspaceIds.has(agent.workspaceId));
     const hiddenAgentIds = new Set(
       agents
         .filter((agent) => hiddenWorkspaceIds.has(agent.workspaceId))
         .map((agent) => agent.id)
     );
-    const visibleRuntimes = options.includeHidden
-      ? runtimes
-      : runtimes.filter(
-          (runtime) =>
-            !(runtime.agentId && hiddenAgentIds.has(runtime.agentId)) &&
-            !(runtime.workspaceId && hiddenWorkspaceIds.has(runtime.workspaceId))
-        );
+    const visibleRuntimes = runtimes.filter(
+      (runtime) =>
+        !(runtime.agentId && hiddenAgentIds.has(runtime.agentId)) &&
+        !(runtime.workspaceId && hiddenWorkspaceIds.has(runtime.workspaceId))
+    );
     const hiddenRuntimeIds = new Set(
       runtimes
         .filter(
@@ -542,34 +572,32 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
       ...hiddenAgentIds,
       ...hiddenRuntimeIds
     ]);
-    const visibleRelationships = options.includeHidden
-      ? relationships
-      : relationships.filter(
-          (relationship) =>
-            !hiddenNodeIds.has(relationship.sourceId) &&
-            !hiddenNodeIds.has(relationship.targetId)
-        );
-    const visibleWorkspaces = options.includeHidden
-      ? workspaces
-      : workspaces.filter((workspace) => !hiddenWorkspaceIds.has(workspace.id));
+    const visibleRelationships = relationships.filter(
+      (relationship) =>
+        !hiddenNodeIds.has(relationship.sourceId) &&
+        !hiddenNodeIds.has(relationship.targetId)
+    );
+    const visibleWorkspaces = workspaces.filter((workspace) => !hiddenWorkspaceIds.has(workspace.id));
 
-    const modelUsage = new Map<string, number>();
-    for (const agent of visibleAgents) {
-      modelUsage.set(agent.modelId, (modelUsage.get(agent.modelId) ?? 0) + 1);
-    }
+    const mapModels = (sourceAgents: OpenClawAgent[]) => {
+      const modelUsage = new Map<string, number>();
+      for (const agent of sourceAgents) {
+        modelUsage.set(agent.modelId, (modelUsage.get(agent.modelId) ?? 0) + 1);
+      }
 
-    const mappedModels: ModelRecord[] = models.map((model) => ({
-      id: model.key,
-      name: model.name,
-      provider: model.key.split("/")[0] || "unknown",
-      input: model.input,
-      contextWindow: model.contextWindow,
-      local: model.local,
-      available: model.available,
-      missing: model.missing,
-      tags: model.tags,
-      usageCount: modelUsage.get(model.key) ?? 0
-    }));
+      return models.map((model) => ({
+        id: model.key,
+        name: model.name,
+        provider: model.key.split("/")[0] || "unknown",
+        input: model.input,
+        contextWindow: model.contextWindow,
+        local: model.local,
+        available: model.available,
+        missing: model.missing,
+        tags: model.tags,
+        usageCount: modelUsage.get(model.key) ?? 0
+      })) satisfies ModelRecord[];
+    };
 
     const securityWarnings =
       status?.securityAudit?.findings
@@ -617,9 +645,10 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
       })
     } satisfies MissionControlSnapshot["diagnostics"];
 
-    const snapshot: MissionControlSnapshot = {
-      generatedAt: new Date().toISOString(),
-      mode: "live",
+    const generatedAt = new Date().toISOString();
+    const sharedSnapshotFields = {
+      generatedAt,
+      mode: "live" as const,
       diagnostics,
       presence: presence.map((entry) => ({
         host: entry.host,
@@ -632,11 +661,6 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
         text: entry.text,
         ts: entry.ts
       })) as PresenceRecord[],
-      workspaces: visibleWorkspaces,
-      agents: visibleAgents,
-      models: mappedModels,
-      runtimes: visibleRuntimes,
-      relationships: visibleRelationships,
       missionPresets: [
         "Audit the selected workspace and generate a concrete first task batch.",
         "Plan a multi-agent delivery mission for the current product goal.",
@@ -644,15 +668,36 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
       ]
     };
 
-    snapshotCache = {
-      snapshot,
-      expiresAt: Date.now() + 2500
+    return {
+      full: {
+        ...sharedSnapshotFields,
+        workspaces,
+        agents,
+        models: mapModels(agents),
+        runtimes,
+        relationships
+      },
+      visible: {
+        ...sharedSnapshotFields,
+        workspaces: visibleWorkspaces,
+        agents: visibleAgents,
+        models: mapModels(visibleAgents),
+        runtimes: visibleRuntimes,
+        relationships: visibleRelationships
+      }
     };
-
-    return snapshot;
   } catch (error) {
-    return createFallbackSnapshot(error instanceof Error ? error.message : "Unknown OpenClaw error.");
+    return createSnapshotPair(
+      createFallbackSnapshot(error instanceof Error ? error.message : "Unknown OpenClaw error.")
+    );
   }
+}
+
+function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair {
+  return {
+    visible: snapshot,
+    full: snapshot
+  };
 }
 
 export async function submitMission(input: MissionSubmission): Promise<MissionResponse> {
@@ -760,8 +805,13 @@ async function mapSessionToRuntimes(
 }
 
 export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutputRecord> {
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
+  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
+  let runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
+
+  if (!runtime) {
+    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
+  }
 
   if (!runtime) {
     return {
