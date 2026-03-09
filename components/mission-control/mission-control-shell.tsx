@@ -1200,7 +1200,7 @@ function CanvasTopBar({
             role="menu"
             aria-label="OpenClaw settings"
             className={cn(
-              "absolute right-0 top-[calc(100%+12px)] z-[70] w-[320px] rounded-[22px] border p-3.5 shadow-[0_22px_64px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
+              "absolute right-0 top-[calc(100%+12px)] z-[70] max-h-[min(82vh,calc(100svh-96px))] w-[320px] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 shadow-[0_22px_64px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
               surfaceTheme === "light"
                 ? "border-[#dbc9bc]/90 bg-[rgba(252,247,241,0.95)] text-[#4a382c] shadow-[0_24px_60px_rgba(161,125,101,0.18)]"
                 : "border-cyan-300/12 bg-[rgba(10,16,28,0.9)] text-slate-100"
@@ -1431,10 +1431,11 @@ function CanvasTopBar({
                 onChange={(event) => onGatewayDraftChange(event.target.value)}
                 placeholder="ws://127.0.0.1:18789"
                 disabled={isSavingGateway}
+                style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
                 className={cn(
                   "mt-3 h-10 rounded-[16px] px-3 text-[12px]",
                   surfaceTheme === "light"
-                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] placeholder:text-[#b29b8b] focus-visible:ring-[#c8946f]/45"
+                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
                     : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
                 )}
               />
