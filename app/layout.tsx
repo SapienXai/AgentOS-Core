@@ -4,12 +4,40 @@ import { Toaster } from "@/components/ui/sonner";
 
 import "@/app/globals.css";
 
+const siteTitle = "AgentOS | OpenClaw Mission Control";
+const siteDescription = "Human Control Layer for AI Agents and Companies | Built on OpenClaw.";
+const socialImagePath = "/readme/banner.jpeg";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.VERCEL_URL;
+
 export const metadata: Metadata = {
-  title: "AgentOS | OpenClaw Mission Control",
-  description: "Human Control Layer for AI Agents and Companies | Built on OpenClaw.",
-  applicationName: "OpenClaw Mission Control",
+  metadataBase: siteUrl
+    ? new URL(siteUrl.startsWith("http") ? siteUrl : `https://${siteUrl}`)
+    : undefined,
+  title: siteTitle,
+  description: siteDescription,
+  applicationName: "AgentOS | Mission Control",
   themeColor: "#09101c",
   manifest: "/site.webmanifest",
+  openGraph: {
+    type: "website",
+    siteName: "AgentOS | Mission Control",
+    title: siteTitle,
+    description: siteDescription,
+    images: [
+      {
+        url: socialImagePath,
+        width: 1536,
+        height: 1024,
+        alt: "AgentOS mission-control interface"
+      }
+    ]
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: siteTitle,
+    description: siteDescription,
+    images: [socialImagePath]
+  },
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
