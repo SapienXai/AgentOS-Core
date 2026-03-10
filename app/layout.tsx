@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { Toaster } from "@/components/ui/sonner";
 
@@ -8,15 +8,17 @@ const siteTitle = "AgentOS | OpenClaw Mission Control";
 const siteDescription = "Human Control Layer for AI Agents and Companies | Built on OpenClaw.";
 const socialImagePath = "/readme/banner.jpeg";
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.VERCEL_URL;
+const metadataBase = new URL(siteUrl ? (siteUrl.startsWith("http") ? siteUrl : `https://${siteUrl}`) : "http://localhost:3000");
+
+export const viewport: Viewport = {
+  themeColor: "#09101c"
+};
 
 export const metadata: Metadata = {
-  metadataBase: siteUrl
-    ? new URL(siteUrl.startsWith("http") ? siteUrl : `https://${siteUrl}`)
-    : undefined,
+  metadataBase,
   title: siteTitle,
   description: siteDescription,
   applicationName: "AgentOS | Mission Control",
-  themeColor: "#09101c",
   manifest: "/site.webmanifest",
   openGraph: {
     type: "website",

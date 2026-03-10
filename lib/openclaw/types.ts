@@ -27,6 +27,40 @@ export interface AgentHeartbeatInput {
   every?: string;
 }
 
+export interface ModelAuthProviderStatus {
+  provider: string;
+  connected: boolean;
+  canLogin: boolean;
+  detail: string | null;
+}
+
+export interface ModelReadiness {
+  ready: boolean;
+  defaultModel: string | null;
+  resolvedDefaultModel: string | null;
+  defaultModelReady: boolean;
+  recommendedModelId: string | null;
+  preferredLoginProvider: string | null;
+  totalModelCount: number;
+  availableModelCount: number;
+  localModelCount: number;
+  remoteModelCount: number;
+  missingModelCount: number;
+  authProviders: ModelAuthProviderStatus[];
+  issues: string[];
+}
+
+export interface DiscoveredModelCandidate {
+  id: string;
+  modelId: string;
+  name: string;
+  provider: string;
+  contextWindow: number | null;
+  supportsTools: boolean;
+  isFree: boolean;
+  input: string | null;
+}
+
 export interface GatewayDiagnostics {
   installed: boolean;
   loaded: boolean;
@@ -49,6 +83,7 @@ export interface GatewayDiagnostics {
   updateChannel?: string;
   updateInfo?: string;
   serviceLabel?: string;
+  modelReadiness: ModelReadiness;
   securityWarnings: string[];
   issues: string[];
 }
@@ -300,6 +335,40 @@ export type OpenClawOnboardingStreamEvent =
       snapshot?: MissionControlSnapshot;
       manualCommand?: string;
       docsUrl?: string;
+    };
+
+export type OpenClawModelOnboardingPhase =
+  | "detecting"
+  | "discovering"
+  | "refreshing"
+  | "configuring-default"
+  | "authenticating"
+  | "verifying"
+  | "ready";
+
+export type OpenClawModelOnboardingStreamEvent =
+  | {
+      type: "status";
+      phase: OpenClawModelOnboardingPhase;
+      message: string;
+    }
+  | {
+      type: "log";
+      stream: "stdout" | "stderr";
+      text: string;
+    }
+  | {
+      type: "done";
+      ok: boolean;
+      phase: OpenClawModelOnboardingPhase;
+      message: string;
+      exitCode?: number | null;
+      stdout: string;
+      stderr: string;
+      snapshot?: MissionControlSnapshot;
+      manualCommand?: string;
+      docsUrl?: string;
+      discoveredModels?: DiscoveredModelCandidate[];
     };
 
 export type WorkspaceSourceMode = "empty" | "clone" | "existing";

@@ -37,6 +37,7 @@ import type {
   AgentPolicy,
   AgentStatus,
   AgentUpdateInput,
+  ModelReadiness,
   MissionControlSnapshot,
   MissionResponse,
   MissionSubmission,
@@ -178,6 +179,31 @@ type ModelsPayload = {
     tags: string[];
     missing: boolean;
   }>;
+};
+
+type ModelsStatusPayload = {
+  defaultModel?: string | null;
+  resolvedDefault?: string | null;
+  auth?: {
+    providers?: Array<{
+      provider?: string;
+      effective?: {
+        kind?: string;
+        detail?: string;
+      };
+      profiles?: {
+        count?: number;
+      };
+    }>;
+    missingProvidersInUse?: string[];
+    unusableProfiles?: unknown[];
+    oauth?: {
+      providers?: Array<{
+        provider?: string;
+        status?: string;
+      }>;
+    };
+  };
 };
 
 type SessionsPayload = {
@@ -360,6 +386,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       agentsResult,
       agentConfigResult,
       modelsResult,
+      modelStatusResult,
       sessionsResult,
       presenceResult
     ] = await Promise.allSettled([
@@ -369,6 +396,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       runOpenClawJson<AgentPayload>(["agents", "list", "--json"]),
       runOpenClawJson<AgentConfigPayload>(["config", "get", "agents.list", "--json"]),
       runOpenClawJson<ModelsPayload>(["models", "list", "--json"]),
+      runOpenClawJson<ModelsStatusPayload>(["models", "status", "--json"]),
       runOpenClawJson<SessionsPayload>(["sessions", "--all-agents", "--json"]),
       runOpenClawJson<PresencePayload>(["gateway", "call", "system-presence", "--json"])
     ]);
@@ -383,6 +411,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
     const agentsList = agentsResult.status === "fulfilled" ? agentsResult.value : [];
     const agentConfig = agentConfigResult.status === "fulfilled" ? agentConfigResult.value : [];
     const models = modelsResult.status === "fulfilled" ? modelsResult.value.models : [];
+    const modelStatus = modelStatusResult.status === "fulfilled" ? modelStatusResult.value : undefined;
     const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.sessions : [];
     const presence = presenceResult.status === "fulfilled" ? presenceResult.value : [];
 
@@ -613,6 +642,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       })) satisfies ModelRecord[];
     };
 
+    const modelReadiness = resolveModelReadiness(models, modelStatus);
+
     const securityWarnings =
       status?.securityAudit?.findings
         ?.filter((entry) => entry.severity === "warn")
@@ -651,12 +682,14 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       updateChannel: status?.updateChannel || "stable",
       updateInfo,
       serviceLabel: gatewayStatus?.service?.label,
+      modelReadiness,
       securityWarnings,
       issues: collectIssues({
         gatewayStatus: gatewayStatusResult,
         status: statusResult,
         agents: agentsResult,
         models: modelsResult,
+        modelStatus: modelStatusResult,
         sessions: sessionsResult
       })
     } satisfies MissionControlSnapshot["diagnostics"];
@@ -4147,6 +4180,165 @@ function resolveWorkspaceHealth(agentIds: string[], agents: OpenClawAgent[]): Ag
   return "standby";
 }
 
+function resolveModelReadiness(
+  models: ModelsPayload["models"],
+  modelStatus?: ModelsStatusPayload
+): ModelReadiness {
+  const readyModels = models.filter((model) => isReadyModelRecord(model));
+  const providerIds = unique(
+    [
+      ...models.map((model) => model.key.split("/")[0] || "unknown"),
+      ...((modelStatus?.auth?.providers ?? []).map((entry) => entry.provider).filter(isNonEmptyString)),
+      ...((modelStatus?.auth?.oauth?.providers ?? []).map((entry) => entry.provider).filter(isNonEmptyString))
+    ].filter(isNonEmptyString)
+  );
+  const authProviderMap = new Map(
+    (modelStatus?.auth?.providers ?? [])
+      .filter((entry): entry is NonNullable<typeof entry> & { provider: string } => isNonEmptyString(entry.provider))
+      .map((entry) => [entry.provider, entry])
+  );
+  const oauthProviderMap = new Map(
+    (modelStatus?.auth?.oauth?.providers ?? [])
+      .filter((entry): entry is NonNullable<typeof entry> & { provider: string } => isNonEmptyString(entry.provider))
+      .map((entry) => [entry.provider, entry])
+  );
+  const resolvedDefaultModel = normalizeOptionalValue(modelStatus?.resolvedDefault ?? undefined);
+  const defaultModel = normalizeOptionalValue(modelStatus?.defaultModel ?? undefined);
+  const defaultModelId = resolvedDefaultModel ?? defaultModel;
+  const defaultProvider = defaultModelId ? resolveModelProviderId(defaultModelId) : null;
+  const defaultModelReady = Boolean(defaultModelId && readyModels.some((model) => model.key === defaultModelId));
+  const recommendedModelId = defaultModelReady ? defaultModelId : readyModels[0]?.key ?? null;
+  const authProviders = providerIds.map((provider) => {
+    const providerModels = models.filter((model) => (model.key.split("/")[0] || "unknown") === provider);
+    const hasRemoteRoute = providerModels.some((model) => model.local !== true);
+    const providerAuth = authProviderMap.get(provider);
+    const oauthStatus = oauthProviderMap.get(provider);
+    const connected =
+      providerModels.some((model) => isReadyModelRecord(model)) ||
+      (providerAuth?.profiles?.count ?? 0) > 0 ||
+      oauthStatus?.status === "ok";
+    let detail: string | null = null;
+
+    if (oauthStatus?.status === "ok") {
+      detail = "OAuth connected";
+    } else if ((providerAuth?.profiles?.count ?? 0) > 0) {
+      detail = `${providerAuth?.profiles?.count} auth profile${providerAuth?.profiles?.count === 1 ? "" : "s"}`;
+    } else if (providerModels.some((model) => model.local)) {
+      detail = "Install or pull a local model to unlock this route.";
+    } else if (hasRemoteRoute) {
+      detail = resolveProviderSetupDetail(provider);
+    }
+
+    return {
+      provider,
+      connected,
+      canLogin: hasRemoteRoute,
+      detail
+    };
+  });
+  const missingProvidersInUse = (modelStatus?.auth?.missingProvidersInUse ?? []).filter(isNonEmptyString);
+  const missingProviderSet = new Set(missingProvidersInUse);
+  const unusableProfileCount = modelStatus?.auth?.unusableProfiles?.length ?? 0;
+  const issues: string[] = [];
+
+  if (readyModels.length === 0) {
+    issues.push("No available models were detected yet.");
+  }
+
+  if (readyModels.length > 0 && !defaultModelId) {
+    issues.push("Choose a default model to finish setup.");
+  }
+
+  if (defaultModelId && !defaultModelReady) {
+    if (defaultProvider && missingProviderSet.has(defaultProvider)) {
+      issues.push(`Default model is set, but ${formatProviderLabel(defaultProvider)} auth is still missing.`);
+    } else if (missingProvidersInUse.length > 0) {
+      issues.push(`Default model is set, but auth is still missing for: ${missingProvidersInUse.join(", ")}.`);
+    } else {
+      issues.push("The selected default model is not ready yet.");
+    }
+  }
+
+  if (missingProvidersInUse.length > 0 && !defaultModelId) {
+    issues.push(`Auth is still missing for: ${missingProvidersInUse.join(", ")}.`);
+  }
+
+  if (unusableProfileCount > 0) {
+    issues.push("Some stored model auth profiles are not usable.");
+  }
+
+  return {
+    ready: readyModels.length > 0 && defaultModelReady,
+    defaultModel: defaultModel ?? null,
+    resolvedDefaultModel: resolvedDefaultModel ?? null,
+    defaultModelReady,
+    recommendedModelId: recommendedModelId ?? null,
+    preferredLoginProvider:
+      authProviders.find(
+        (provider) =>
+          provider.provider === defaultProvider && !provider.connected && provider.canLogin
+      )?.provider ??
+      missingProvidersInUse.find((provider) =>
+        authProviders.some((entry) => entry.provider === provider && !entry.connected && entry.canLogin)
+      ) ??
+      authProviders.find((provider) => !provider.connected && provider.canLogin)?.provider ??
+      (providerIds.includes("openai-codex") || readyModels.length === 0 ? "openai-codex" : null),
+    totalModelCount: models.length,
+    availableModelCount: readyModels.length,
+    localModelCount: readyModels.filter((model) => model.local).length,
+    remoteModelCount: readyModels.filter((model) => model.local !== true).length,
+    missingModelCount: models.filter((model) => model.missing || model.available === false).length,
+    authProviders,
+    issues: unique(issues)
+  };
+}
+
+function isReadyModelRecord(model: ModelsPayload["models"][number]) {
+  return model.available !== false && !model.missing;
+}
+
+function resolveModelProviderId(modelId: string) {
+  const [provider] = modelId.split("/", 1);
+  return provider || null;
+}
+
+function formatProviderLabel(provider: string) {
+  const normalized = provider.trim().toLowerCase();
+
+  if (normalized === "openrouter") {
+    return "OpenRouter";
+  }
+
+  if (normalized === "openai-codex") {
+    return "OpenAI Codex";
+  }
+
+  if (normalized === "openai") {
+    return "OpenAI";
+  }
+
+  if (normalized === "anthropic") {
+    return "Anthropic";
+  }
+
+  if (normalized === "ollama") {
+    return "Ollama";
+  }
+
+  return provider
+    .split("-")
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
+function resolveProviderSetupDetail(provider: string) {
+  if (provider.trim().toLowerCase() === "openrouter") {
+    return `Add your ${formatProviderLabel(provider)} API key in terminal to use this route.`;
+  }
+
+  return `Connect ${formatProviderLabel(provider)} auth in terminal to use this route.`;
+}
+
 function resolveDiagnosticHealth(rpcOk: boolean | undefined, warningCount: number) {
   if (!rpcOk) {
     return "offline";
@@ -4164,6 +4356,7 @@ function collectIssues(results: {
   status: PromiseSettledResult<StatusPayload>;
   agents: PromiseSettledResult<AgentPayload>;
   models: PromiseSettledResult<ModelsPayload>;
+  modelStatus: PromiseSettledResult<ModelsStatusPayload>;
   sessions: PromiseSettledResult<SessionsPayload>;
 }) {
   return Object.entries(results)
@@ -4283,6 +4476,10 @@ function prettifyAgentName(agentId: string | undefined) {
 
 function unique(values: string[]) {
   return Array.from(new Set(values));
+}
+
+function isNonEmptyString(value: string | null | undefined): value is string {
+  return Boolean(value);
 }
 
 function padNumber(value: number) {

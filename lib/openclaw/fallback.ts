@@ -21,6 +21,34 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       dashboardUrl: "http://127.0.0.1:18789/",
       gatewayUrl: "ws://127.0.0.1:18789",
       configuredGatewayUrl: null,
+      modelReadiness: {
+        ready: true,
+        defaultModel: "openai-codex/gpt-5.1-codex-mini",
+        resolvedDefaultModel: "openai-codex/gpt-5.1-codex-mini",
+        defaultModelReady: true,
+        recommendedModelId: "openai-codex/gpt-5.1-codex-mini",
+        preferredLoginProvider: "openai-codex",
+        totalModelCount: 2,
+        availableModelCount: 2,
+        localModelCount: 1,
+        remoteModelCount: 1,
+        missingModelCount: 0,
+        authProviders: [
+          {
+            provider: "openai-codex",
+            connected: true,
+            canLogin: true,
+            detail: "Fallback demo profile"
+          },
+          {
+            provider: "ollama",
+            connected: true,
+            canLogin: false,
+            detail: "Fallback demo profile"
+          }
+        ],
+        issues: []
+      },
       securityWarnings: [],
       issues: [reason]
     },
