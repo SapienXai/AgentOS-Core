@@ -299,3 +299,24 @@
 .mission-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
+
+@keyframes operation-progress-fill {
+  from {
+    width: 0%;
+  }
+
+  to {
+    width: 100%;
+  }
+}
+
+.operation-progress__fill {
+  width: 100%;
+  transform-origin: left center;
+}
+
+.operation-progress__fill--active {
+  animation-name: operation-progress-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}

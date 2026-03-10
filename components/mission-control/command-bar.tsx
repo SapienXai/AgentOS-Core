@@ -52,7 +52,7 @@ type InlineSuggestion = {
   label: string;
   mission?: string;
   thinking?: ThinkingLevel;
-  action?: "apply-mission" | "open-workspace-planner";
+  action?: "apply-mission" | "open-workspace-create" | "open-workspace-planner";
 };
 
 const composerDraftStoragePrefix = "mission-control-composer-draft";
@@ -65,6 +65,7 @@ export function CommandBar({
   selectedNodeId,
   composeIntent,
   onRefresh,
+  onOpenWorkspaceCreate,
   onOpenWorkspacePlanner,
   onMissionResponse,
   onMissionDispatchStart,
@@ -75,6 +76,7 @@ export function CommandBar({
   selectedNodeId: string | null;
   composeIntent: ComposeIntent | null;
   onRefresh: () => Promise<void>;
+  onOpenWorkspaceCreate: () => void;
   onOpenWorkspacePlanner: () => void;
   onMissionResponse: (result: MissionResponse) => void;
   onMissionDispatchStart: (payload: {
@@ -537,7 +539,7 @@ export function CommandBar({
                     )}
                   </IconButton>
 
-                  <IconButton label="Plan a workspace" onClick={onOpenWorkspacePlanner}>
+                  <IconButton label="Create workspace" onClick={onOpenWorkspaceCreate}>
                     <Sparkles className="h-3.5 w-3.5" />
                   </IconButton>
 
@@ -596,6 +598,11 @@ export function CommandBar({
                           key={suggestion.id}
                           label={suggestion.label}
                           onClick={() => {
+                            if (suggestion.action === "open-workspace-create") {
+                              onOpenWorkspaceCreate();
+                              return;
+                            }
+
                             if (suggestion.action === "open-workspace-planner") {
                               onOpenWorkspacePlanner();
                               return;
@@ -837,8 +844,14 @@ function buildInlineSuggestions(
   const suggestions: InlineSuggestion[] = [];
 
   suggestions.push({
+    id: "workspace-create",
+    label: "Create workspace",
+    action: "open-workspace-create"
+  });
+
+  suggestions.push({
     id: "workspace-planner",
-    label: "Plan a workspace",
+    label: "Advanced setup",
     action: "open-workspace-planner"
   });
 

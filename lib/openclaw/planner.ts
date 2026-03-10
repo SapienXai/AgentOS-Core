@@ -6,6 +6,10 @@ import path from "node:path";
 import { runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import {
+  buildPlannerDeployProgressTemplate,
+  createOperationProgressTracker
+} from "@/lib/openclaw/operation-progress";
+import {
   applyPlannerInput,
   applyPlannerTemplate,
   createPlannerAgentSpec,
@@ -37,6 +41,7 @@ import type {
   PlannerChannelSpec,
   PlannerContextSource,
   PlannerHookSpec,
+  OperationProgressSnapshot,
   PlannerPersistentAgentSpec,
   PlannerSandboxSpec,
   PlannerWorkflowSpec,
@@ -53,6 +58,20 @@ const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspac
 const WEBSITE_INSPECTION_TIMEOUT_MS = 3500;
 const PLANNER_RUNTIME_NAME = "Mission Control Planner Runtime";
 const PLANNER_RUNTIME_SYSTEM_TAG = "mission-control-planner";
+
+type WorkspacePlanDeployOptions = {
+  onProgress?: (snapshot: OperationProgressSnapshot) => Promise<void> | void;
+};
+
+type PlannerOperationProgressUpdate = {
+  message: string;
+  percent: number;
+  status?: "active" | "done" | "error";
+};
+
+type PlannerOperationProgressHandler = (
+  update: PlannerOperationProgressUpdate
+) => Promise<void> | void;
 
 const plannerRuntimeAgentBlueprints: Array<WorkspaceAgentBlueprintInput> = [
   {
@@ -313,7 +332,8 @@ export async function simulateWorkspacePlan(
 
 export async function deployWorkspacePlan(
   planId: string,
-  incomingPlan?: WorkspacePlan
+  incomingPlan?: WorkspacePlan,
+  options: WorkspacePlanDeployOptions = {}
 ): Promise<WorkspacePlanDeployResult> {
   const basePlan = incomingPlan
     ? await persistIncomingPlan(planId, incomingPlan)
@@ -325,29 +345,140 @@ export async function deployWorkspacePlan(
       reviewRequested: true
     }
   });
+  const enabledAgentCount = nextPlan.team.persistentAgents.filter((agent) => agent.enabled).length;
+  const hasChannels = nextPlan.operations.channels.some(
+    (channel) => channel.enabled && channel.type !== "internal"
+  );
+  const hasAutomations = nextPlan.operations.automations.some((automation) => automation.enabled);
+  const hasPlannerKickoffs = nextPlan.deploy.firstMissions.some((mission) => mission.trim().length > 0);
+  const progress = createOperationProgressTracker({
+    template: buildPlannerDeployProgressTemplate({
+      sourceMode: nextPlan.workspace.sourceMode,
+      agentCount: enabledAgentCount,
+      kickoffMission: nextPlan.workspace.rules.kickoffMission,
+      hasChannels,
+      hasAutomations,
+      hasPlannerKickoffs
+    }),
+    onProgress: options.onProgress
+  });
+
+  await progress.startStep("plan", "Checking deploy blockers and locking the planner state.");
 
   if (nextPlan.deploy.blockers.length > 0) {
+    const blockerMessage = `Resolve deploy blockers first: ${nextPlan.deploy.blockers.join(" ")}`;
+    await progress.addActivity("plan", blockerMessage, "error");
+    await progress.failStep("plan", blockerMessage);
     throw new Error(`Resolve deploy blockers first: ${nextPlan.deploy.blockers.join(" ")}`);
   }
 
+  await progress.addActivity("plan", "Deploy blockers cleared.", "done");
   nextPlan.status = "deploying";
   nextPlan.stage = "deploying";
   await saveWorkspacePlan(nextPlan);
+  await progress.completeStep("plan", "Planner state locked. Workspace bootstrap is starting.");
 
   try {
     const workspaceInput = buildWorkspaceCreateInput(nextPlan);
-    const created = await createWorkspaceProject(workspaceInput);
+    const created = await createWorkspaceProject(workspaceInput, {
+      onProgress: async (workspaceProgress) => {
+        for (const step of workspaceProgress.steps) {
+          await progress.syncStep(step);
+        }
+      }
+    });
 
+    await progress.startStep("blueprint", "Writing planner blueprint and deploy notes into the new workspace.");
+    await progress.addActivity("blueprint", "Persisting planner blueprint, deploy report, and docs.");
     await writePlannerWorkspaceFiles(nextPlan, created.workspacePath, created);
+    await progress.completeStep("blueprint", "Planner blueprint and docs are now in the workspace.");
 
     const createdAgentIdMap = buildCreatedAgentIdMap(nextPlan);
-    const channelProvision = await provisionPlannerChannels(nextPlan.operations.channels);
+    await progress.startStep(
+      "channels",
+      hasChannels ? "Provisioning enabled external channels." : "No external channels were requested."
+    );
+    if (!hasChannels) {
+      await progress.addActivity("channels", "No enabled external channels. Skipping channel provisioning.", "done");
+    }
+    const channelProvision = await provisionPlannerChannels(nextPlan.operations.channels, {
+      onProgress: async ({ message, percent, status }) => {
+        await progress.updateStep("channels", {
+          percent,
+          detail: message,
+          status: status === "error" ? "active" : undefined
+        });
+        await progress.addActivity("channels", message, status);
+      }
+    });
+    await progress.completeStep(
+      "channels",
+      hasChannels
+        ? `${channelProvision.provisioned.length} channel${channelProvision.provisioned.length === 1 ? "" : "s"} provisioned.`
+        : "Channel stage complete."
+    );
+
+    await progress.startStep(
+      "automations",
+      hasAutomations ? "Provisioning enabled automation loops." : "No recurring automations were requested."
+    );
+    if (!hasAutomations) {
+      await progress.addActivity("automations", "No enabled automations. Skipping automation provisioning.", "done");
+    }
     const automationProvision = await provisionPlannerAutomations(
       nextPlan,
       created.workspaceId,
-      createdAgentIdMap
+      createdAgentIdMap,
+      {
+        onProgress: async ({ message, percent, status }) => {
+          await progress.updateStep("automations", {
+            percent,
+            detail: message,
+            status: status === "error" ? "active" : undefined
+          });
+          await progress.addActivity("automations", message, status);
+        }
+      }
     );
-    const kickoffRunIds = await runPlannerKickoffMissions(nextPlan, created.workspaceId, createdAgentIdMap);
+    await progress.completeStep(
+      "automations",
+      hasAutomations
+        ? `${automationProvision.provisioned.length} automation${automationProvision.provisioned.length === 1 ? "" : "s"} provisioned.`
+        : "Automation stage complete."
+    );
+
+    await progress.startStep(
+      "planner-kickoff",
+      hasPlannerKickoffs ? "Dispatching planner kickoff missions." : "No planner kickoff missions were requested."
+    );
+    if (!hasPlannerKickoffs) {
+      await progress.addActivity(
+        "planner-kickoff",
+        "No planner kickoff missions. Finalizing deploy.",
+        "done"
+      );
+    }
+    const kickoffRunIds = await runPlannerKickoffMissions(
+      nextPlan,
+      created.workspaceId,
+      createdAgentIdMap,
+      {
+        onProgress: async ({ message, percent, status }) => {
+          await progress.updateStep("planner-kickoff", {
+            percent,
+            detail: message,
+            status: status === "error" ? "active" : undefined
+          });
+          await progress.addActivity("planner-kickoff", message, status);
+        }
+      }
+    );
+    await progress.completeStep(
+      "planner-kickoff",
+      hasPlannerKickoffs
+        ? `${kickoffRunIds.length} kickoff mission${kickoffRunIds.length === 1 ? "" : "s"} launched.`
+        : "Deploy finalized without extra kickoff missions."
+    );
     const warnings = uniqueStrings([
       ...nextPlan.deploy.warnings,
       ...channelProvision.warnings,
@@ -385,7 +516,7 @@ export async function deployWorkspacePlan(
     finalPlan.stage = "deployed";
     await saveWorkspacePlan(finalPlan);
 
-    return {
+    const result = {
       plan: finalPlan,
       workspaceId: created.workspaceId,
       workspacePath: created.workspacePath,
@@ -394,6 +525,8 @@ export async function deployWorkspacePlan(
       kickoffRunIds: finalPlan.deploy.kickoffRunIds,
       warnings
     };
+
+    return result;
   } catch (error) {
     nextPlan.status = "blocked";
     nextPlan.stage = "pressure-test";
@@ -1350,30 +1483,68 @@ async function writePlannerWorkspaceFiles(
   await writeFile(path.join(docsPath, "workflows.md"), `# Workflows\n\n${workflowSummary}\n`, "utf8");
 }
 
-async function provisionPlannerChannels(channels: PlannerChannelSpec[]) {
+async function provisionPlannerChannels(
+  channels: PlannerChannelSpec[],
+  options: {
+    onProgress?: PlannerOperationProgressHandler;
+  } = {}
+) {
   const provisioned: string[] = [];
   const warnings: string[] = [];
+  const enabledChannels = channels.filter((entry) => entry.enabled && entry.type !== "internal");
 
-  for (const channel of channels.filter((entry) => entry.enabled && entry.type !== "internal")) {
+  if (enabledChannels.length === 0) {
+    await options.onProgress?.({
+      message: "No enabled external channels. Skipping channel provisioning.",
+      percent: 100,
+      status: "done"
+    });
+  }
+
+  for (const [index, channel] of enabledChannels.entries()) {
     const credentialMap = Object.fromEntries(
       channel.credentials.map((credential) => [credential.key, credential.value.trim()])
     );
     const args = buildChannelCommandArgs(channel, credentialMap);
+    const startingPercent = Math.round((index / enabledChannels.length) * 100);
+
+    await options.onProgress?.({
+      message: `Provisioning channel ${index + 1} of ${enabledChannels.length}: ${channel.name}.`,
+      percent: startingPercent,
+      status: "active"
+    });
 
     if (!args) {
       warnings.push(`Channel "${channel.name}" uses an unsupported provisioning shape.`);
+      await options.onProgress?.({
+        message: `Skipped ${channel.name}. Mission Control does not know how to provision this channel shape yet.`,
+        percent: Math.round(((index + 1) / enabledChannels.length) * 100),
+        status: "error"
+      });
       continue;
     }
 
     try {
       await runOpenClaw(args, { timeoutMs: 60000 });
       provisioned.push(channel.name);
+      await options.onProgress?.({
+        message: `Provisioned ${channel.name}.`,
+        percent: Math.round(((index + 1) / enabledChannels.length) * 100),
+        status: "done"
+      });
     } catch (error) {
       warnings.push(
         `Channel "${channel.name}" could not be provisioned: ${
           error instanceof Error ? error.message : "unknown error"
         }`
       );
+      await options.onProgress?.({
+        message: `Channel ${channel.name} could not be provisioned: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+        percent: Math.round(((index + 1) / enabledChannels.length) * 100),
+        status: "error"
+      });
     }
   }
 
@@ -1445,34 +1616,75 @@ function buildChannelCommandArgs(channel: PlannerChannelSpec, credentialMap: Rec
 async function provisionPlannerAutomations(
   plan: WorkspacePlan,
   workspaceId: string,
-  createdAgentIdMap: Record<string, string>
+  createdAgentIdMap: Record<string, string>,
+  options: {
+    onProgress?: PlannerOperationProgressHandler;
+  } = {}
 ) {
   const provisioned: string[] = [];
   const warnings: string[] = [];
+  const enabledAutomations = plan.operations.automations.filter((entry) => entry.enabled);
 
-  for (const automation of plan.operations.automations.filter((entry) => entry.enabled)) {
+  if (enabledAutomations.length === 0) {
+    await options.onProgress?.({
+      message: "No enabled automations. Skipping automation provisioning.",
+      percent: 100,
+      status: "done"
+    });
+  }
+
+  for (const [index, automation] of enabledAutomations.entries()) {
     const args = buildAutomationCommandArgs(plan, automation, createdAgentIdMap);
+    const startingPercent = Math.round((index / enabledAutomations.length) * 100);
+
+    await options.onProgress?.({
+      message: `Provisioning automation ${index + 1} of ${enabledAutomations.length}: ${automation.name}.`,
+      percent: startingPercent,
+      status: "active"
+    });
 
     if (!args) {
       warnings.push(`Automation "${automation.name}" could not be mapped to a live agent.`);
+      await options.onProgress?.({
+        message: `Skipped ${automation.name}. It could not be mapped to a live agent.`,
+        percent: Math.round(((index + 1) / enabledAutomations.length) * 100),
+        status: "error"
+      });
       continue;
     }
 
     try {
       await runOpenClaw(args, { timeoutMs: 60000 });
       provisioned.push(automation.name);
+      await options.onProgress?.({
+        message: `Provisioned automation ${automation.name}.`,
+        percent: Math.round(((index + 1) / enabledAutomations.length) * 100),
+        status: "done"
+      });
     } catch (error) {
       warnings.push(
         `Automation "${automation.name}" failed to provision: ${
           error instanceof Error ? error.message : "unknown error"
         }`
       );
+      await options.onProgress?.({
+        message: `Automation ${automation.name} failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+        percent: Math.round(((index + 1) / enabledAutomations.length) * 100),
+        status: "error"
+      });
     }
   }
 
   const snapshot = await getMissionControlSnapshot({ force: true });
   if (!snapshot.workspaces.some((workspace) => workspace.id === workspaceId)) {
     warnings.push("Workspace snapshot did not refresh immediately after deploy.");
+    await options.onProgress?.({
+      message: "Workspace snapshot did not refresh immediately after deploy.",
+      percent: 100,
+      status: "error"
+    });
   }
 
   return {
@@ -1532,7 +1744,10 @@ function buildAutomationCommandArgs(
 async function runPlannerKickoffMissions(
   plan: WorkspacePlan,
   workspaceId: string,
-  createdAgentIdMap: Record<string, string>
+  createdAgentIdMap: Record<string, string>,
+  options: {
+    onProgress?: PlannerOperationProgressHandler;
+  } = {}
 ) {
   const kickoffAssignments = [
     {
@@ -1558,7 +1773,23 @@ async function runPlannerKickoffMissions(
 
   const runIds: string[] = [];
 
-  for (const assignment of kickoffAssignments) {
+  if (kickoffAssignments.length === 0) {
+    await options.onProgress?.({
+      message: "No planner kickoff missions. Finalizing deploy.",
+      percent: 100,
+      status: "done"
+    });
+  }
+
+  for (const [index, assignment] of kickoffAssignments.entries()) {
+    const startingPercent = Math.round((index / kickoffAssignments.length) * 100);
+
+    await options.onProgress?.({
+      message: `Dispatching kickoff ${index + 1} of ${kickoffAssignments.length} to ${assignment.agentId}.`,
+      percent: startingPercent,
+      status: "active"
+    });
+
     try {
       const response = await submitMission({
         agentId: assignment.agentId,
@@ -1567,7 +1798,17 @@ async function runPlannerKickoffMissions(
         thinking: "medium"
       });
       runIds.push(response.runId);
+      await options.onProgress?.({
+        message: `Kickoff mission started for ${assignment.agentId}. Run ${response.runId}.`,
+        percent: Math.round(((index + 1) / kickoffAssignments.length) * 100),
+        status: "done"
+      });
     } catch {
+      await options.onProgress?.({
+        message: `Kickoff mission could not be started for ${assignment.agentId}.`,
+        percent: Math.round(((index + 1) / kickoffAssignments.length) * 100),
+        status: "error"
+      });
       continue;
     }
   }

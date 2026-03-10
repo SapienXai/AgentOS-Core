@@ -17,6 +17,7 @@ import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
+import { WorkspaceCreateDialog } from "@/components/mission-control/workspace-create-dialog";
 import { WorkspacePlannerDialog } from "@/components/mission-control/workspace-planner-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -128,6 +129,7 @@ export function MissionControlShell({
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
+  const [isWorkspaceCreateOpen, setIsWorkspaceCreateOpen] = useState(false);
   const [isWorkspacePlannerOpen, setIsWorkspacePlannerOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
@@ -1112,6 +1114,7 @@ export function MissionControlShell({
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
             onRefresh={refresh}
+            onOpenWorkspaceCreate={() => setIsWorkspaceCreateOpen(true)}
             onOpenWorkspacePlanner={() => setIsWorkspacePlannerOpen(true)}
             onMissionResponse={setLastMission}
             onMissionDispatchStart={setPendingMission}
@@ -1166,6 +1169,21 @@ export function MissionControlShell({
             }
           />
         ) : null}
+
+        <WorkspaceCreateDialog
+          open={isWorkspaceCreateOpen}
+          onOpenChange={setIsWorkspaceCreateOpen}
+          onOpenAdvanced={() => {
+            setIsWorkspaceCreateOpen(false);
+            setIsWorkspacePlannerOpen(true);
+          }}
+          snapshot={snapshot}
+          onRefresh={refresh}
+          onWorkspaceCreated={(workspaceId) => {
+            setActiveWorkspaceId(workspaceId);
+            setSelectedNodeId(workspaceId);
+          }}
+        />
 
         <WorkspacePlannerDialog
           open={isWorkspacePlannerOpen}

@@ -371,6 +371,31 @@ export type OpenClawModelOnboardingStreamEvent =
       discoveredModels?: DiscoveredModelCandidate[];
     };
 
+export type OperationProgressStepStatus = "pending" | "active" | "done" | "error";
+
+export interface OperationProgressActivity {
+  id: string;
+  message: string;
+  status: OperationProgressStepStatus;
+}
+
+export interface OperationProgressStepSnapshot {
+  id: string;
+  label: string;
+  description: string;
+  status: OperationProgressStepStatus;
+  percent: number;
+  detail?: string;
+  activities: OperationProgressActivity[];
+}
+
+export interface OperationProgressSnapshot {
+  title: string;
+  description: string;
+  percent: number;
+  steps: OperationProgressStepSnapshot[];
+}
+
 export type WorkspaceSourceMode = "empty" | "clone" | "existing";
 
 export type WorkspaceTemplate = "software" | "frontend" | "backend" | "research" | "content";
@@ -434,6 +459,24 @@ export interface WorkspaceCreateResult {
   kickoffStatus?: string;
   kickoffError?: string;
 }
+
+export type WorkspaceCreateStreamEvent =
+  | {
+      type: "progress";
+      progress: OperationProgressSnapshot;
+    }
+  | {
+      type: "done";
+      ok: true;
+      progress: OperationProgressSnapshot;
+      result: WorkspaceCreateResult;
+    }
+  | {
+      type: "done";
+      ok: false;
+      error: string;
+      progress?: OperationProgressSnapshot;
+    };
 
 export type WorkspacePlanStatus =
   | "draft"
@@ -718,6 +761,24 @@ export interface WorkspacePlanDeployResult {
   kickoffRunIds: string[];
   warnings: string[];
 }
+
+export type WorkspacePlanDeployStreamEvent =
+  | {
+      type: "progress";
+      progress: OperationProgressSnapshot;
+    }
+  | {
+      type: "done";
+      ok: true;
+      progress: OperationProgressSnapshot;
+      result: WorkspacePlanDeployResult;
+    }
+  | {
+      type: "done";
+      ok: false;
+      error: string;
+      progress?: OperationProgressSnapshot;
+    };
 
 export interface AgentCreateInput {
   id: string;

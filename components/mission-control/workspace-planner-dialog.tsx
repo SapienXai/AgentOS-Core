@@ -26,14 +26,20 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { OperationProgress } from "@/components/mission-control/operation-progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
+import { consumeNdjsonStream } from "@/lib/ndjson";
 import {
   AGENT_PRESET_OPTIONS,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
+import {
+  buildPlannerDeployProgressTemplate,
+  createPendingOperationProgressSnapshot
+} from "@/lib/openclaw/operation-progress";
 import {
   applyPlannerTemplate,
   createPlannerAgentSpec,
@@ -51,8 +57,10 @@ import type {
   PlannerChannelType,
   PlannerPersistentAgentSpec,
   PlannerWorkspaceSize,
+  OperationProgressSnapshot,
   WorkspacePlan,
   WorkspacePlanDeployResult,
+  WorkspacePlanDeployStreamEvent,
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
@@ -206,6 +214,7 @@ export function WorkspacePlannerDialog({
   const [isSaving, setIsSaving] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
+  const [deployProgress, setDeployProgress] = useState<OperationProgressSnapshot | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendProgressStep, setSendProgressStep] = useState(0);
   const [planId, setPlanId] = useState<string | null>(null);
@@ -271,6 +280,24 @@ export function WorkspacePlannerDialog({
     () => getPlannerBusyStatus({ initialTurn: !intakeStarted, step: sendProgressStep, active: isSending }),
     [intakeStarted, isSending, sendProgressStep]
   );
+  const initialDeployProgress = useMemo(
+    () =>
+      createPendingOperationProgressSnapshot(
+        buildPlannerDeployProgressTemplate({
+          sourceMode: plan?.workspace.sourceMode ?? "empty",
+          agentCount: plan?.team.persistentAgents.filter((agent) => agent.enabled).length ?? 0,
+          kickoffMission: plan?.workspace.rules.kickoffMission ?? true,
+          hasChannels: Boolean(
+            plan?.operations.channels.some((channel) => channel.enabled && channel.type !== "internal")
+          ),
+          hasAutomations: Boolean(
+            plan?.operations.automations.some((automation) => automation.enabled)
+          ),
+          hasPlannerKickoffs: Boolean(plan?.deploy.firstMissions.some((mission) => mission.trim().length > 0))
+        })
+      ),
+    [plan]
+  );
 
   const createFreshPlan = useCallback(async () => {
     const response = await fetch("/api/planner", {
@@ -321,6 +348,7 @@ export function WorkspacePlannerDialog({
 
   useEffect(() => {
     if (!open) {
+      setDeployProgress(null);
       return;
     }
 
@@ -473,6 +501,7 @@ export function WorkspacePlannerDialog({
     }
 
     setIsDeploying(true);
+    setDeployProgress(initialDeployProgress);
 
     try {
       const response = await fetch(`/api/planner/${planId}/deploy`, {
@@ -481,14 +510,41 @@ export function WorkspacePlannerDialog({
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          plan
+          plan,
+          stream: true
         })
       });
-      const result = (await response.json()) as (WorkspacePlanDeployResult & { error?: string }) | null;
 
-      if (!response.ok || !result || !result.plan) {
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(result?.error || "Unable to deploy planner workspace.");
       }
+
+      let deployResult: WorkspacePlanDeployResult | null = null;
+      let deployError: string | null = null;
+
+      await consumeNdjsonStream<WorkspacePlanDeployStreamEvent>(response, async (event) => {
+        if (event.type === "progress") {
+          setDeployProgress(event.progress);
+          return;
+        }
+
+        if (event.progress) {
+          setDeployProgress(event.progress);
+        }
+
+        if (event.ok) {
+          deployResult = event.result;
+        } else {
+          deployError = event.error;
+        }
+      });
+
+      if (deployError || !deployResult) {
+        throw new Error(deployError || "Unable to deploy planner workspace.");
+      }
+
+      const result = deployResult as WorkspacePlanDeployResult;
 
       setPlan(result.plan);
       await onRefresh();
@@ -620,6 +676,15 @@ export function WorkspacePlannerDialog({
               ) : null}
             </div>
           </DialogHeader>
+
+          {isDeploying ? (
+            <div className="border-b border-white/10 px-4 py-3">
+              <OperationProgress
+                progress={deployProgress ?? initialDeployProgress}
+                className="bg-white/[0.02]"
+              />
+            </div>
+          ) : null}
 
           {isLoading || !plan ? (
             <div className="flex flex-1 items-center justify-center">

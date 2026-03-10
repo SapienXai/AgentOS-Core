@@ -24,7 +24,16 @@ import {
   resolveHeartbeatDraft,
   serializeHeartbeatConfig
 } from "@/lib/openclaw/agent-heartbeat";
-import { detectOpenClaw, runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import {
+  detectOpenClaw,
+  runOpenClaw,
+  runOpenClawJson,
+  runOpenClawJsonStream
+} from "@/lib/openclaw/cli";
+import {
+  buildWorkspaceCreateProgressTemplate,
+  createOperationProgressTracker
+} from "@/lib/openclaw/operation-progress";
 import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
@@ -36,6 +45,7 @@ import type {
   AgentHeartbeatInput,
   AgentPolicy,
   AgentStatus,
+  OperationProgressSnapshot,
   AgentUpdateInput,
   ModelReadiness,
   MissionControlSnapshot,
@@ -167,6 +177,15 @@ type MutableAgentConfigEntry = AgentConfigPayload[number] & Record<string, unkno
 type MissionControlSettings = {
   workspaceRoot?: string;
 };
+
+type WorkspaceCreateOptions = {
+  onProgress?: (snapshot: OperationProgressSnapshot) => Promise<void> | void;
+};
+
+type KickoffProgressHandler = (update: {
+  message: string;
+  percent: number;
+}) => Promise<void> | void;
 
 type ModelsPayload = {
   models: Array<{
@@ -1186,25 +1205,61 @@ export async function deleteAgent(input: AgentDeleteInput) {
   };
 }
 
-export async function createWorkspaceProject(input: WorkspaceCreateInput): Promise<WorkspaceCreateResult> {
+export async function createWorkspaceProject(
+  input: WorkspaceCreateInput,
+  options: WorkspaceCreateOptions = {}
+): Promise<WorkspaceCreateResult> {
   const normalized = resolveWorkspaceBootstrapInput(input);
-  const targetDir = await resolveWorkspaceCreationTargetDir(normalized);
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const enabledAgents = normalized.agents.filter((agent) => agent.enabled);
+  const progress = createOperationProgressTracker({
+    template: buildWorkspaceCreateProgressTemplate({
+      sourceMode: normalized.sourceMode,
+      agentCount: enabledAgents.length,
+      kickoffMission: normalized.rules.kickoffMission
+    }),
+    onProgress: options.onProgress
+  });
 
   if (enabledAgents.length === 0) {
     throw new Error("Enable at least one agent for the workspace.");
   }
 
-  assertWorkspaceBootstrapAgentIdsAvailable(snapshot, normalized.slug, enabledAgents);
+  await progress.startStep(
+    "validate",
+    "Resolving workspace settings and reserving the target directory."
+  );
+  await progress.addActivity("validate", `Validated workspace name "${normalized.name}".`);
 
+  const targetDir = await resolveWorkspaceCreationTargetDir(normalized);
+  await progress.updateStep("validate", {
+    percent: 38,
+    detail: `Reserved target directory at ${targetDir}.`
+  });
+  await progress.addActivity("validate", `Reserved target directory ${targetDir}.`, "done");
+
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+  await progress.updateStep("validate", {
+    percent: 72,
+    detail: "Checking current OpenClaw snapshot and agent ids."
+  });
+  assertWorkspaceBootstrapAgentIdsAvailable(snapshot, normalized.slug, enabledAgents);
+  await progress.completeStep(
+    "validate",
+    `Workspace input and ${enabledAgents.length} agent configuration${enabledAgents.length === 1 ? "" : "s"} are ready.`
+  );
+
+  await progress.startStep("source", describeWorkspaceSourceStart(normalized.sourceMode, targetDir));
+  await progress.addActivity("source", describeWorkspaceSourceActivity(normalized.sourceMode, normalized), "active");
   await materializeWorkspaceSource({
     targetDir,
     sourceMode: normalized.sourceMode,
     repoUrl: normalized.repoUrl,
     existingPath: normalized.existingPath
   });
+  await progress.completeStep("source", describeWorkspaceSourceCompletion(normalized.sourceMode, targetDir));
 
+  await progress.startStep("scaffold", "Writing the initial workspace scaffold and local metadata.");
+  await progress.addActivity("scaffold", "Generating workspace docs, memory, and configuration files.");
   await scaffoldWorkspaceContents(targetDir, {
     name: normalized.name,
     brief: normalized.brief,
@@ -1215,10 +1270,26 @@ export async function createWorkspaceProject(input: WorkspaceCreateInput): Promi
     sourceMode: normalized.sourceMode,
     agents: enabledAgents
   });
+  await progress.completeStep("scaffold", "Workspace files and starter docs are in place.");
 
   const createdAgentIds: string[] = [];
 
+  await progress.startStep(
+    "agents",
+    enabledAgents.length === 1
+      ? "Provisioning the first workspace agent."
+      : `Provisioning ${enabledAgents.length} workspace agents.`
+  );
+
   for (const agent of enabledAgents) {
+    const createdCount = createdAgentIds.length;
+    const nextIndex = createdCount + 1;
+    await progress.updateStep("agents", {
+      percent: Math.round((createdCount / enabledAgents.length) * 100),
+      detail: `Creating agent ${nextIndex} of ${enabledAgents.length}: ${agent.name}.`
+    });
+    await progress.addActivity("agents", `Creating ${agent.name} (${agent.role}).`);
+
     const createdAgentId = await createBootstrappedWorkspaceAgent({
       workspacePath: targetDir,
       workspaceSlug: normalized.slug,
@@ -1226,7 +1297,17 @@ export async function createWorkspaceProject(input: WorkspaceCreateInput): Promi
       agent
     });
     createdAgentIds.push(createdAgentId);
+
+    await progress.addActivity("agents", `Created ${agent.name} as ${createdAgentId}.`, "done");
+    await progress.updateStep("agents", {
+      percent: Math.round((createdAgentIds.length / enabledAgents.length) * 100),
+      detail: `${createdAgentIds.length} of ${enabledAgents.length} agent${enabledAgents.length === 1 ? "" : "s"} ready.`
+    });
   }
+  await progress.completeStep(
+    "agents",
+    `${createdAgentIds.length} agent${createdAgentIds.length === 1 ? "" : "s"} linked to the workspace.`
+  );
 
   const primaryAgentId =
     createdAgentIds.find((agentId) =>
@@ -1240,19 +1321,41 @@ export async function createWorkspaceProject(input: WorkspaceCreateInput): Promi
   let kickoffError: string | undefined;
 
   if (normalized.rules.kickoffMission) {
+    await progress.startStep("kickoff", `Dispatching the kickoff mission to ${primaryAgentId}.`);
+    await progress.addActivity("kickoff", `Selected ${primaryAgentId} as the primary agent.`);
+
     try {
       const kickoffResult = await runWorkspaceKickoffMission({
         agentId: primaryAgentId,
         brief: normalized.brief,
         modelProfile: normalized.modelProfile,
         template: normalized.template
+      }, {
+        onProgress: async ({ message, percent }) => {
+          await progress.updateStep("kickoff", {
+            percent,
+            detail: message
+          });
+          await progress.addActivity(
+            "kickoff",
+            message,
+            percent >= 100 ? "done" : "active"
+          );
+        }
       });
       kickoffRunId = kickoffResult.runId;
       kickoffStatus = kickoffResult.status;
+      await progress.completeStep("kickoff", `Kickoff mission finished with status ${kickoffStatus || "unknown"}.`);
     } catch (error) {
       kickoffError =
         error instanceof Error ? error.message : "Kickoff mission could not be started.";
+      await progress.addActivity("kickoff", kickoffError, "error");
+      await progress.failStep("kickoff", kickoffError);
     }
+  } else {
+    await progress.startStep("kickoff", "Finalizing workspace bootstrap.");
+    await progress.addActivity("kickoff", "Kickoff mission is disabled for this workspace.", "done");
+    await progress.completeStep("kickoff", "Workspace bootstrap finished without kickoff.");
   }
 
   snapshotCache = null;
@@ -1842,12 +1945,17 @@ async function createBootstrappedWorkspaceAgent(params: {
   return agentId;
 }
 
-async function runWorkspaceKickoffMission(params: {
-  agentId: string;
-  brief?: string;
-  modelProfile: WorkspaceModelProfile;
-  template: WorkspaceTemplate;
-}) {
+async function runWorkspaceKickoffMission(
+  params: {
+    agentId: string;
+    brief?: string;
+    modelProfile: WorkspaceModelProfile;
+    template: WorkspaceTemplate;
+  },
+  options: {
+    onProgress?: KickoffProgressHandler;
+  } = {}
+) {
   const prompt = buildWorkspaceKickoffPrompt(params.template, params.brief);
   const thinking =
     params.modelProfile === "fast"
@@ -1856,7 +1964,12 @@ async function runWorkspaceKickoffMission(params: {
         ? "high"
         : "medium";
 
-  return runOpenClawJson<MissionCommandPayload>(
+  await options.onProgress?.({
+    message: "Submitting the kickoff brief to the primary agent.",
+    percent: 18
+  });
+
+  const result = await runOpenClawJsonStream<MissionCommandPayload>(
     [
       "agent",
       "--agent",
@@ -1869,8 +1982,107 @@ async function runWorkspaceKickoffMission(params: {
       "90",
       "--json"
     ],
-    { timeoutMs: 120000 }
+    {
+      timeoutMs: 120000,
+      onStdout: async (text: string) => {
+        const messages = extractKickoffProgressMessages(text);
+
+        if (messages.length === 0 && text.trim()) {
+          await options.onProgress?.({
+            message: "Primary agent responded. Finalizing kickoff output.",
+            percent: 82
+          });
+          return;
+        }
+
+        for (const message of messages) {
+          await options.onProgress?.({
+            message,
+            percent: 72
+          });
+        }
+      },
+      onStderr: async (text: string) => {
+        const stderr = text.trim();
+
+        if (!stderr) {
+          return;
+        }
+
+        await options.onProgress?.({
+          message: `Kickoff runtime: ${stderr.split(/\r?\n/)[0]}`,
+          percent: 64
+        });
+      }
+    }
   );
+
+  await options.onProgress?.({
+    message: "Kickoff mission completed. Recording the resulting run metadata.",
+    percent: 100
+  });
+
+  return result;
+}
+
+function describeWorkspaceSourceStart(sourceMode: WorkspaceSourceMode, targetDir: string) {
+  if (sourceMode === "clone") {
+    return `Cloning the source repository into ${targetDir}.`;
+  }
+
+  if (sourceMode === "existing") {
+    return `Preparing the existing workspace folder at ${targetDir}.`;
+  }
+
+  return `Creating a fresh workspace folder at ${targetDir}.`;
+}
+
+function describeWorkspaceSourceActivity(
+  sourceMode: WorkspaceSourceMode,
+  normalized: ResolvedWorkspaceBootstrapInput
+) {
+  if (sourceMode === "clone") {
+    return normalized.repoUrl
+      ? `Cloning ${normalized.repoUrl}.`
+      : "Cloning the requested repository.";
+  }
+
+  if (sourceMode === "existing") {
+    return normalized.existingPath
+      ? `Attaching ${normalized.existingPath}.`
+      : "Attaching the requested folder.";
+  }
+
+  return "Preparing an empty workspace scaffold.";
+}
+
+function describeWorkspaceSourceCompletion(sourceMode: WorkspaceSourceMode, targetDir: string) {
+  if (sourceMode === "clone") {
+    return `Repository content is available at ${targetDir}.`;
+  }
+
+  if (sourceMode === "existing") {
+    return `Existing folder linked and ready at ${targetDir}.`;
+  }
+
+  return `Fresh workspace folder created at ${targetDir}.`;
+}
+
+function extractKickoffProgressMessages(text: string) {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  const normalized = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^[>•*-]\s*/, ""))
+    .filter((line) => !line.startsWith("{") && !line.startsWith("["));
+
+  return Array.from(new Set(normalized)).slice(0, 3);
 }
 
 function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWorkspaceBootstrapInput {

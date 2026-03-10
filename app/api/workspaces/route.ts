@@ -7,6 +7,7 @@ import {
   getMissionControlSnapshot,
   updateWorkspaceProject
 } from "@/lib/openclaw/service";
+import type { OperationProgressSnapshot, WorkspaceCreateStreamEvent } from "@/lib/openclaw/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +63,10 @@ const workspaceSchema = z.object({
     .optional()
 });
 
+const workspaceCreateRequestSchema = workspaceSchema.extend({
+  stream: z.boolean().optional()
+});
+
 const workspaceUpdateSchema = z.object({
   workspaceId: z.string().min(1),
   name: z.string().optional(),
@@ -81,10 +86,74 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const input = workspaceSchema.parse(await request.json());
-    const created = await createWorkspaceProject(input);
+    const parsed = workspaceCreateRequestSchema.parse(await request.json());
+    const { stream, ...input } = parsed;
 
-    return NextResponse.json(created);
+    if (!stream) {
+      const created = await createWorkspaceProject(input);
+
+      return NextResponse.json(created);
+    }
+
+    const responseStream = new TransformStream();
+    const writer = responseStream.writable.getWriter();
+    const encoder = new TextEncoder();
+    let writeChain = Promise.resolve();
+    let latestProgress: OperationProgressSnapshot | undefined;
+
+    const send = (event: WorkspaceCreateStreamEvent) => {
+      writeChain = writeChain
+        .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+        .catch(() => {});
+
+      return writeChain;
+    };
+
+    void (async () => {
+      try {
+        const created = await createWorkspaceProject(input, {
+          onProgress: async (progress) => {
+            latestProgress = progress;
+            await send({
+              type: "progress",
+              progress
+            });
+          }
+        });
+
+        await send({
+          type: "done",
+          ok: true,
+          progress:
+            latestProgress ??
+            ({
+              title: "Provisioning workspace",
+              description: "Workspace bootstrap finished.",
+              percent: 100,
+              steps: []
+            } satisfies OperationProgressSnapshot),
+          result: created
+        });
+      } catch (error) {
+        await send({
+          type: "done",
+          ok: false,
+          error: error instanceof Error ? error.message : "Unable to create workspace.",
+          progress: latestProgress
+        });
+      } finally {
+        await writeChain;
+        await writer.close();
+      }
+    })();
+
+    return new Response(responseStream.readable, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store"
+      }
+    });
+
   } catch (error) {
     return NextResponse.json(
       {

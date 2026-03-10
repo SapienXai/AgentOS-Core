@@ -1,6 +1,6 @@
 import "server-only";
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -15,6 +15,11 @@ let npmGlobalPrefixPromise: Promise<string> | null = null;
 
 interface CommandOptions {
   timeoutMs?: number;
+}
+
+interface StreamingCommandOptions extends CommandOptions {
+  onStdout?: (text: string) => Promise<void> | void;
+  onStderr?: (text: string) => Promise<void> | void;
 }
 
 export interface CommandResult {
@@ -45,6 +50,131 @@ export async function runOpenClawJson<T>(
 ): Promise<T> {
   try {
     const result = await runOpenClaw(args, options);
+    return parseJsonOutput<T>(result.stdout || result.stderr);
+  } catch (error) {
+    const failedResult = extractFailedCommandResult(error);
+
+    if (failedResult) {
+      try {
+        return parseJsonOutput<T>(failedResult.stdout || failedResult.stderr);
+      } catch {}
+    }
+
+    throw error;
+  }
+}
+
+export async function runOpenClawStream(
+  args: string[],
+  options: StreamingCommandOptions = {}
+): Promise<CommandResult> {
+  const openClawBin = await resolveOpenClawBin();
+
+  return new Promise<CommandResult>((resolve, reject) => {
+    const child = spawn(openClawBin, args, {
+      cwd: process.cwd(),
+      env: process.env
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+    let timedOut = false;
+    let callbackChain = Promise.resolve();
+
+    const queueCallback = (
+      callback: ((text: string) => Promise<void> | void) | undefined,
+      text: string
+    ) => {
+      if (!callback || !text) {
+        return;
+      }
+
+      callbackChain = callbackChain.then(() => callback(text)).catch(() => {});
+    };
+
+    const settle = (handler: () => void) => {
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+      void callbackChain.finally(handler);
+    };
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, options.timeoutMs ?? 45000);
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      stdout += text;
+      queueCallback(options.onStdout, text);
+    });
+
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      stderr += text;
+      queueCallback(options.onStderr, text);
+    });
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      settle(() => {
+        reject(
+          createCommandError(
+            `OpenClaw command failed to start: ${error.message}`,
+            stdout,
+            stderr ? `${stderr}\n${error.message}` : error.message,
+            null
+          )
+        );
+      });
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      settle(() => {
+        if (timedOut) {
+          reject(
+            createCommandError(
+              `OpenClaw command timed out after ${Math.round((options.timeoutMs ?? 45000) / 1000)} seconds.`,
+              stdout,
+              stderr || "The command exceeded its timeout window.",
+              code
+            )
+          );
+          return;
+        }
+
+        if (code !== 0) {
+          reject(
+            createCommandError(
+              `OpenClaw command failed with exit code ${code}.`,
+              stdout,
+              stderr,
+              code
+            )
+          );
+          return;
+        }
+
+        resolve({
+          stdout,
+          stderr
+        });
+      });
+    });
+  });
+}
+
+export async function runOpenClawJsonStream<T>(
+  args: string[],
+  options: StreamingCommandOptions = {}
+): Promise<T> {
+  try {
+    const result = await runOpenClawStream(args, options);
     return parseJsonOutput<T>(result.stdout || result.stderr);
   } catch (error) {
     const failedResult = extractFailedCommandResult(error);
@@ -148,6 +278,20 @@ function extractFailedCommandResult(error: unknown): CommandResult | null {
   }
 
   return { stdout, stderr };
+}
+
+function createCommandError(message: string, stdout: string, stderr: string, code: number | null) {
+  const error = new Error(message) as Error & {
+    stdout: string;
+    stderr: string;
+    code: number | null;
+  };
+
+  error.stdout = stdout;
+  error.stderr = stderr;
+  error.code = code;
+
+  return error;
 }
 
 function stringifyStream(value: unknown) {
