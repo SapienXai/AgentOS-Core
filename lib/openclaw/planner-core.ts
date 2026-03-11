@@ -1174,6 +1174,7 @@ export function applyPlannerInput(plan: WorkspacePlan, message: string) {
   addDetectedConstraints(nextPlan, normalized);
   addDetectedOffer(nextPlan, normalized, lower);
   addDetectedScope(nextPlan, normalized);
+  addDetectedRequestedAgents(nextPlan, lower);
 
   if (/\bdaily\b/.test(lower) && !nextPlan.operations.automations.some((entry) => entry.id === "daily-triage")) {
     nextPlan.operations.automations.push(
@@ -1345,17 +1346,23 @@ export function createArchitectReply(
   lastUserMessage?: string,
   previousPlan?: WorkspacePlan
 ) {
+  const language = resolvePlannerReplyLanguage(plan, lastUserMessage);
+
   if (!plan.intake.started) {
     return createPlannerMessage(
       "assistant",
       "Workspace Architect",
-      "Describe the project in one prompt. You can paste a website URL, repo URL, or an existing folder path and I will draft the workspace from there."
+      language === "tr"
+        ? "Projeyi tek mesajda anlat. Bir website URL'si, repo URL'si ya da mevcut klasör yolu yapıştır; ben de buradan workspace taslağını çıkarayım."
+        : "Describe the project in one prompt. You can paste a website URL, repo URL, or an existing folder path and I will draft the workspace from there."
     );
   }
 
   const reviewMode = isPlannerReviewMode(plan);
   const blockers = reviewMode ? plan.deploy.blockers : [];
-  const confirmations = plan.intake.confirmations.slice(0, 2);
+  const confirmations = plan.intake.confirmations
+    .slice(0, 2)
+    .map((entry) => localizePlannerPrompt(entry, language));
   const topInferences = plan.intake.inferences
     .slice(0, 4)
     .map((entry) => `${entry.label}: ${entry.value}`);
@@ -1374,30 +1381,66 @@ export function createArchitectReply(
 
   const lines = [
     appliedChanges.length > 0
-      ? `Applied: ${appliedChanges.join(" ")}`
+      ? language === "tr"
+        ? "Son yönlendirmene göre taslağı güncelledim."
+        : `Applied: ${appliedChanges.join(" ")}`
       : plan.intake.turnCount <= 1
-        ? "I drafted the first pass from your brief."
-        : "I updated the draft with your latest direction.",
-    sourceReadout.length > 0 ? `Context in play: ${sourceReadout.join(" · ")}.` : "",
-    topInferences.length > 0 ? `Current draft: ${topInferences.join(" | ")}.` : "",
-    topRecommendations.length > 0 && !reviewMode ? `Background draft: ${topRecommendations.join(" ")}` : "",
+        ? language === "tr"
+          ? "İlk taslağı verdiğin brief üzerinden çıkardım."
+          : "I drafted the first pass from your brief."
+        : language === "tr"
+          ? "Taslağı son yönlendirmene göre güncelledim."
+          : "I updated the draft with your latest direction.",
+    sourceReadout.length > 0
+      ? language === "tr"
+        ? `Kullandığım bağlam: ${sourceReadout.join(" · ")}.`
+        : `Context in play: ${sourceReadout.join(" · ")}.`
+      : "",
+    topInferences.length > 0
+      ? language === "tr"
+        ? `Şu anki taslak: ${topInferences.join(" | ")}.`
+        : `Current draft: ${topInferences.join(" | ")}.`
+      : "",
+    topRecommendations.length > 0 && !reviewMode
+      ? language === "tr"
+        ? `Arka plan taslağı: ${topRecommendations.join(" ")}`
+        : `Background draft: ${topRecommendations.join(" ")}`
+      : "",
     wantsSourceInference && confirmations.length > 0
-      ? `I filled what I could from the linked context. The page still leaves these items ambiguous: ${confirmations.join("; ")}.`
+      ? language === "tr"
+        ? `Bağlı kaynaktan çıkarabildiğim her alanı doldurdum. Sayfa şu noktaları hâlâ belirsiz bırakıyor: ${confirmations.join("; ")}.`
+        : `I filled what I could from the linked context. The page still leaves these items ambiguous: ${confirmations.join("; ")}.`
       : wantsGapList && confirmations.length > 0
-        ? `Still missing or low-confidence: ${confirmations.join("; ")}.`
+        ? language === "tr"
+          ? `Hâlâ eksik ya da düşük güvenli noktalar: ${confirmations.join("; ")}.`
+          : `Still missing or low-confidence: ${confirmations.join("; ")}.`
         : !reviewMode && confirmations.length > 0
       ? confirmations.length === 1
-        ? `Next I need one decision: ${confirmations[0]}`
-        : `Next I need two decisions: ${confirmations[0]} Then ${lowercaseFirst(confirmations[1])}`
+        ? language === "tr"
+          ? `Senden sıradaki tek karar şu: ${confirmations[0]}`
+          : `Next I need one decision: ${confirmations[0]}`
+        : language === "tr"
+          ? `Senden sıradaki iki karar şu: ${confirmations[0]} Sonra ${lowercaseFirst(confirmations[1])}`
+          : `Next I need two decisions: ${confirmations[0]} Then ${lowercaseFirst(confirmations[1])}`
       : reviewMode && confirmations.length > 0
-        ? `Before deploy, confirm: ${confirmations.join("; ")}.`
+        ? language === "tr"
+          ? `Deploy öncesi şunları netleştirelim: ${confirmations.join("; ")}.`
+          : `Before deploy, confirm: ${confirmations.join("; ")}.`
         : blockers.length > 0
-          ? `Before DEPLOY I still need: ${blockers.join("; ")}.`
+          ? language === "tr"
+            ? `DEPLOY öncesi hâlâ şunlara ihtiyacım var: ${blockers.join("; ")}.`
+            : `Before DEPLOY I still need: ${blockers.join("; ")}.`
           : reviewMode
-            ? "Blueprint is structurally ready for DEPLOY. Review warnings once, then launch."
-            : "The draft is coherent. If you want, I can open the advanced editor or move into deploy review next.",
+            ? language === "tr"
+              ? "Blueprint yapısal olarak DEPLOY için hazır. Uyarıları bir kez gözden geçirip ardından launch edebiliriz."
+              : "Blueprint is structurally ready for DEPLOY. Review warnings once, then launch."
+            : language === "tr"
+              ? "Taslak tutarlı görünüyor. İstersen şimdi gelişmiş editörü açayım ya da deploy review aşamasına geçeyim."
+              : "The draft is coherent. If you want, I can open the advanced editor or move into deploy review next.",
     lastUserMessage && appliedChanges.length === 0
-      ? `Latest direction captured: "${lastUserMessage.trim()}".`
+      ? language === "tr"
+        ? `Son yönlendirmeyi kaydettim: "${lastUserMessage.trim()}".`
+        : `Latest direction captured: "${lastUserMessage.trim()}".`
       : ""
   ].filter(Boolean);
 
@@ -1428,10 +1471,13 @@ function buildArchitectSummary(
   warnings: string[],
   reviewMode: boolean
 ) {
+  const language = resolvePlannerReplyLanguage(plan);
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
 
   if (!plan.intake.started) {
-    return `Start with one prompt. ${sizeProfile.label} mode keeps the chat lean while the architect still harvests full project context, drafts the team, and prepares the workspace blueprint.`;
+    return language === "tr"
+      ? `Tek bir mesajla başla. ${sizeProfile.label} modunda sohbet yalın kalır; Architect ise arka planda proje bağlamını toplar, ekibi taslaklar ve workspace blueprint'ini hazırlar.`
+      : `Start with one prompt. ${sizeProfile.label} mode keeps the chat lean while the architect still harvests full project context, drafts the team, and prepares the workspace blueprint.`;
   }
 
   const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled).length;
@@ -1440,41 +1486,76 @@ function buildArchitectSummary(
   const confirmations = plan.intake.confirmations.length;
 
   if (!reviewMode) {
-    return [
-      plan.company.mission
-        ? `${plan.company.name || plan.workspace.name || "This workspace"} looks like a ${prettify(plan.workspace.template).toLowerCase()} company focused on ${plan.company.mission}.`
-        : plan.company.name || plan.workspace.name
-          ? `I am shaping the first operating outcome for ${plan.company.name || plan.workspace.name}.`
-          : "I am still shaping the first concrete outcome for this workspace.",
-      plan.company.targetCustomer
-        ? `First audience: ${plan.company.targetCustomer}.`
-        : "I still need the first audience or user segment.",
-      plan.intake.sources.length > 0
-        ? `I already harvested ${plan.intake.sources.length} context source${plan.intake.sources.length === 1 ? "" : "s"}.`
-        : "Give me a website, repo, or short brief and I will infer the first draft.",
-      `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are drafted for ${sizeProfile.label.toLowerCase()} mode.`,
-      confirmations > 0
-        ? `Only ${confirmations} high-value decision${confirmations === 1 ? "" : "s"} still need your input.`
-        : "The draft is coherent. I can open the full blueprint or move into deploy review."
-    ].join(" ");
+    return language === "tr"
+      ? [
+          plan.company.mission
+            ? `${plan.company.name || plan.workspace.name || "Bu workspace"} için odak alanı ${plan.company.mission}.`
+            : plan.company.name || plan.workspace.name
+              ? `${plan.company.name || plan.workspace.name} için ilk operasyonel çıktıyı şekillendiriyorum.`
+              : "Bu workspace için ilk somut çıktıyı hâlâ netleştiriyorum.",
+          plan.company.targetCustomer
+            ? `İlk hedef kitle: ${plan.company.targetCustomer}.`
+            : "İlk kullanıcı ya da hedef segmenti hâlâ netleştirmem gerekiyor.",
+          plan.intake.sources.length > 0
+            ? `${plan.intake.sources.length} bağlam kaynağını zaten topladım.`
+            : "Bir website, repo ya da kısa bir brief ver; ilk taslağı çıkarayım.",
+          `${sizeProfile.label.toLowerCase()} mod için ${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation taslağı hazır.`,
+          confirmations > 0
+            ? `Senden sadece ${confirmations} kritik karar daha gerekiyor.`
+            : "Taslak tutarlı görünüyor. İstersen full blueprint'i açabilir ya da deploy review'a geçebilirim."
+        ].join(" ")
+      : [
+          plan.company.mission
+            ? `${plan.company.name || plan.workspace.name || "This workspace"} looks like a ${prettify(plan.workspace.template).toLowerCase()} company focused on ${plan.company.mission}.`
+            : plan.company.name || plan.workspace.name
+              ? `I am shaping the first operating outcome for ${plan.company.name || plan.workspace.name}.`
+              : "I am still shaping the first concrete outcome for this workspace.",
+          plan.company.targetCustomer
+            ? `First audience: ${plan.company.targetCustomer}.`
+            : "I still need the first audience or user segment.",
+          plan.intake.sources.length > 0
+            ? `I already harvested ${plan.intake.sources.length} context source${plan.intake.sources.length === 1 ? "" : "s"}.`
+            : "Give me a website, repo, or short brief and I will infer the first draft.",
+          `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are drafted for ${sizeProfile.label.toLowerCase()} mode.`,
+          confirmations > 0
+            ? `Only ${confirmations} high-value decision${confirmations === 1 ? "" : "s"} still need your input.`
+            : "The draft is coherent. I can open the full blueprint or move into deploy review."
+        ].join(" ");
   }
 
-  return [
-    plan.company.mission
-      ? `${plan.company.name || plan.workspace.name || "This company"} is pointed at ${plan.company.mission}.`
-      : "The company mission still needs a concise sentence.",
-    plan.company.targetCustomer
-      ? `Primary audience: ${plan.company.targetCustomer}.`
-      : "Target customer is still missing.",
-    `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are configured.`,
-    confirmations > 0
-      ? `${confirmations} confirmation item${confirmations === 1 ? "" : "s"} still need your input.`
-      : blockers.length > 0
-      ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} remain before deploy.`
-      : warnings.length > 0
-        ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} remain to review.`
-        : "No hard blockers remain."
-  ].join(" ");
+  return language === "tr"
+    ? [
+        plan.company.mission
+          ? `${plan.company.name || plan.workspace.name || "Bu şirket"} ${plan.company.mission} hedefi etrafında konumlandı.`
+          : "Şirket misyonu için hâlâ kısa ve net bir cümle gerekiyor.",
+        plan.company.targetCustomer
+          ? `Birincil hedef kitle: ${plan.company.targetCustomer}.`
+          : "Hedef müşteri hâlâ eksik.",
+        `${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation yapılandırıldı.`,
+        confirmations > 0
+          ? `Senden ${confirmations} doğrulama daha gerekiyor.`
+          : blockers.length > 0
+            ? `Deploy öncesi ${blockers.length} blocker kaldı.`
+            : warnings.length > 0
+              ? `Gözden geçirilmesi gereken ${warnings.length} warning var.`
+              : "Kritik blocker kalmadı."
+      ].join(" ")
+    : [
+        plan.company.mission
+          ? `${plan.company.name || plan.workspace.name || "This company"} is pointed at ${plan.company.mission}.`
+          : "The company mission still needs a concise sentence.",
+        plan.company.targetCustomer
+          ? `Primary audience: ${plan.company.targetCustomer}.`
+          : "Target customer is still missing.",
+        `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are configured.`,
+        confirmations > 0
+          ? `${confirmations} confirmation item${confirmations === 1 ? "" : "s"} still need your input.`
+          : blockers.length > 0
+            ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} remain before deploy.`
+            : warnings.length > 0
+              ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} remain to review.`
+              : "No hard blockers remain."
+      ].join(" ");
 }
 
 function resolvePlanStage(
@@ -1707,6 +1788,7 @@ function collectPlanWarnings(plan: WorkspacePlan) {
 }
 
 function buildPlannerConfirmations(plan: WorkspacePlan) {
+  const language = resolvePlannerReplyLanguage(plan);
   const confirmations: string[] = [];
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
   const hasReadyWebsiteSource = plan.intake.sources.some(
@@ -1720,11 +1802,17 @@ function buildPlannerConfirmations(plan: WorkspacePlan) {
   );
 
   if (!plan.company.name) {
-    confirmations.push("What should I call the company or workspace?");
+    confirmations.push(
+      language === "tr" ? "Şirkete ya da workspace'e ne ad verelim?" : "What should I call the company or workspace?"
+    );
   }
 
   if (!plan.company.mission) {
-    confirmations.push("What exact outcome should this workspace optimize for first?");
+    confirmations.push(
+      language === "tr"
+        ? "Bu workspace önce tam olarak hangi çıktıyı optimize etmeli?"
+        : "What exact outcome should this workspace optimize for first?"
+    );
   }
 
   if (!plan.company.targetCustomer) {
@@ -1737,18 +1825,30 @@ function buildPlannerConfirmations(plan: WorkspacePlan) {
     plan.intake.turnCount <= 1 &&
     !mentionsSourceMode(plan.intake.latestPrompt || plan.intake.initialPrompt)
   ) {
-    confirmations.push("Should this start from scratch, clone a repo, or attach an existing folder?");
+    confirmations.push(
+      language === "tr"
+        ? "Buna sıfırdan mı başlayalım, bir repo mu klonlayalım, yoksa mevcut bir klasörü mü bağlayalım?"
+        : "Should this start from scratch, clone a repo, or attach an existing folder?"
+    );
   }
 
   if (plan.company.mission && plan.company.targetCustomer && plan.product.scopeV1.length === 0) {
-    confirmations.push("What is the smallest V1 outcome we should launch first?");
+    confirmations.push(
+      language === "tr"
+        ? "İlk çıkaracağımız en küçük V1 sonucu ne olmalı?"
+        : "What is the smallest V1 outcome we should launch first?"
+    );
   } else if (
     plan.product.nonGoals.length === 0 &&
     canAskBoundaryQuestions &&
     plan.product.scopeV1.length > 0 &&
     (plan.intake.mode === "advanced" || plan.intake.reviewRequested || plan.intake.turnCount >= 4)
   ) {
-    confirmations.push("What should stay explicitly out of scope for V1?");
+    confirmations.push(
+      language === "tr"
+        ? "V1 için neleri özellikle kapsam dışında bırakalım?"
+        : "What should stay explicitly out of scope for V1?"
+    );
   }
 
   if (
@@ -1757,11 +1857,19 @@ function buildPlannerConfirmations(plan: WorkspacePlan) {
     plan.company.successSignals.length === 0 &&
     (plan.intake.mode === "advanced" || plan.intake.reviewRequested || plan.intake.turnCount >= 3)
   ) {
-    confirmations.push("What signal should tell us this workspace is working?");
+    confirmations.push(
+      language === "tr"
+        ? "Bu workspace'in işe yaradığını bize hangi sinyal göstermeli?"
+        : "What signal should tell us this workspace is working?"
+    );
   }
 
   for (const source of plan.intake.sources.filter((entry) => entry.status === "error")) {
-    confirmations.push(`I could not inspect ${source.label}. Confirm the company context manually if this source matters.`);
+    confirmations.push(
+      language === "tr"
+        ? `${source.label} kaynağını inceleyemedim. Bu kaynak önemliyse şirket bağlamını manuel olarak doğrula.`
+        : `I could not inspect ${source.label}. Confirm the company context manually if this source matters.`
+    );
   }
 
   return uniqueStrings(confirmations).slice(
@@ -1911,29 +2019,54 @@ function buildPlannerInferences(plan: WorkspacePlan) {
 }
 
 function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string[]) {
+  const language = resolvePlannerReplyLanguage(plan);
   const suggestions: string[] = [];
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
   const sourceAudience = inferAudienceFromPlannerSources(plan);
 
   if (!plan.company.targetCustomer) {
     if (sourceAudience) {
-      suggestions.push(`The first audience looks like ${lowercaseFirst(sourceAudience)}.`);
+      suggestions.push(
+        language === "tr"
+          ? `İlk hedef kitle ${lowercaseFirst(sourceAudience)} gibi görünüyor.`
+          : `The first audience looks like ${lowercaseFirst(sourceAudience)}.`
+      );
     }
 
     if (plan.workspace.template === "content") {
-      suggestions.push("The first users are community managers and moderators.");
-      suggestions.push("The first users are Telegram members who need faster moderation and onboarding.");
+      suggestions.push(
+        language === "tr"
+          ? "İlk kullanıcılar topluluk yöneticileri ve moderatörler."
+          : "The first users are community managers and moderators."
+      );
+      suggestions.push(
+        language === "tr"
+          ? "İlk kullanıcılar daha hızlı moderasyon ve onboarding isteyen Telegram üyeleri."
+          : "The first users are Telegram members who need faster moderation and onboarding."
+      );
     } else {
-      suggestions.push("The first users are the operators running this workflow every day.");
+      suggestions.push(
+        language === "tr"
+          ? "İlk kullanıcılar bu iş akışını her gün yürüten operatörler."
+          : "The first users are the operators running this workflow every day."
+      );
     }
   }
 
   if (!plan.company.mission) {
-    suggestions.push("The first outcome is automating the highest-volume manual workflow.");
+    suggestions.push(
+      language === "tr"
+        ? "İlk hedef, hacmi en yüksek manuel iş akışını otomatikleştirmek."
+        : "The first outcome is automating the highest-volume manual workflow."
+    );
   }
 
   if (!plan.product.scopeV1.length && plan.company.mission && plan.company.targetCustomer) {
-    suggestions.push("V1 should handle the narrowest useful loop end to end before we expand.");
+    suggestions.push(
+      language === "tr"
+        ? "V1, genişlemeden önce en dar ama faydalı döngüyü uçtan uca çözmeli."
+        : "V1 should handle the narrowest useful loop end to end before we expand."
+    );
   }
 
   if (
@@ -1941,42 +2074,119 @@ function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string
     !plan.workspace.existingPath &&
     !mentionsSourceMode(plan.intake.latestPrompt || plan.intake.initialPrompt)
   ) {
-    suggestions.push("Start from scratch for now.");
-    suggestions.push("Clone an existing repository if you find a good base.");
+    suggestions.push(language === "tr" ? "Şimdilik sıfırdan başlayalım." : "Start from scratch for now.");
+    suggestions.push(
+      language === "tr"
+        ? "İyi bir temel bulursak mevcut bir repository klonlayabiliriz."
+        : "Clone an existing repository if you find a good base."
+    );
   }
 
   if (plan.company.successSignals.length === 0 && plan.intake.turnCount >= 2) {
-    suggestions.push("Success means less manual work, faster response times, and a clearer operating cadence.");
+    suggestions.push(
+      language === "tr"
+        ? "Başarı; daha az manuel iş, daha hızlı yanıt süreleri ve daha net bir operasyon ritmi demek."
+        : "Success means less manual work, faster response times, and a clearer operating cadence."
+    );
   }
 
   if (confirmations.length === 0) {
-    suggestions.push("Open the advanced editor.");
-    suggestions.push("Move into deploy review.");
+    suggestions.push(language === "tr" ? "Gelişmiş editörü aç." : "Open the advanced editor.");
+    suggestions.push(language === "tr" ? "Deploy review aşamasına geç." : "Move into deploy review.");
   }
 
   return uniqueStrings(suggestions).slice(0, sizeProfile.suggestedReplyLimit);
 }
 
 function buildTargetCustomerPrompt(plan: WorkspacePlan) {
+  const language = resolvePlannerReplyLanguage(plan);
   const sourceAudience = inferAudienceFromPlannerSources(plan);
 
   if (sourceAudience) {
-    return `I can read the first audience as ${sourceAudience}. Keep that, or point me to the better segment?`;
+    return language === "tr"
+      ? `İlk hedef kitleyi ${sourceAudience} olarak okuyorum. Bunu koruyalım mı, yoksa daha doğru segmenti sen mi göstereceksin?`
+      : `I can read the first audience as ${sourceAudience}. Keep that, or point me to the better segment?`;
   }
 
   if (plan.workspace.template === "content") {
     if (plan.operations.channels.some((channel) => channel.type === "telegram" && channel.enabled)) {
-      return "Should the first user be community managers, moderators, or Telegram members?";
+      return language === "tr"
+        ? "İlk kullanıcı topluluk yöneticileri, moderatörler ya da Telegram üyeleri mi olmalı?"
+        : "Should the first user be community managers, moderators, or Telegram members?";
     }
 
-    return "Who should this content or community workspace serve first?";
+    return language === "tr"
+      ? "Bu içerik ya da topluluk workspace'i önce kime hizmet etmeli?"
+      : "Who should this content or community workspace serve first?";
   }
 
   if (plan.workspace.template === "research") {
-    return "Who is the first decision-maker or audience for this research workspace?";
+    return language === "tr"
+      ? "Bu araştırma workspace'i için ilk karar verici ya da hedef kitle kim?"
+      : "Who is the first decision-maker or audience for this research workspace?";
   }
 
-  return "Who is the first user or customer segment?";
+  return language === "tr" ? "İlk kullanıcı ya da müşteri segmenti kim?" : "Who is the first user or customer segment?";
+}
+
+function resolvePlannerReplyLanguage(plan: WorkspacePlan, lastUserMessage?: string): "en" | "tr" {
+  const candidates = [
+    lastUserMessage,
+    ...plan.conversation
+      .slice()
+      .reverse()
+      .filter((entry) => entry.role === "user")
+      .map((entry) => entry.text),
+    plan.intake.latestPrompt,
+    plan.intake.initialPrompt
+  ];
+
+  for (const candidate of candidates) {
+    if (isProbablyTurkishText(candidate)) {
+      return "tr";
+    }
+  }
+
+  return "en";
+}
+
+function isProbablyTurkishText(value?: string) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/[çğıöşüÇĞİÖŞÜ]/.test(trimmed)) {
+    return true;
+  }
+
+  const matches = trimmed
+    .toLowerCase()
+    .match(/\b(ve|bir|bu|şu|için|ile|olarak|olan|mı|mi|mu|mü|ne|nasıl|hangi|neden|hedef|ilk|müşteri|kullanıcı|oluştur|gerekli|alanları|yardımcı)\b/g);
+
+  return Boolean(matches && matches.length >= 2);
+}
+
+function localizePlannerPrompt(value: string, language: "en" | "tr") {
+  if (language !== "tr") {
+    return value;
+  }
+
+  return value
+    .replace("What should I call the company or workspace?", "Şirkete ya da workspace'e ne ad verelim?")
+    .replace(
+      "What exact outcome should this workspace optimize for first?",
+      "Bu workspace önce tam olarak hangi çıktıyı optimize etmeli?"
+    )
+    .replace(
+      "Should this start from scratch, clone a repo, or attach an existing folder?",
+      "Buna sıfırdan mı başlayalım, bir repo mu klonlayalım, yoksa mevcut bir klasörü mü bağlayalım?"
+    )
+    .replace("What is the smallest V1 outcome we should launch first?", "İlk çıkaracağımız en küçük V1 sonucu ne olmalı?")
+    .replace("What should stay explicitly out of scope for V1?", "V1 için neleri özellikle kapsam dışında bırakalım?")
+    .replace("What signal should tell us this workspace is working?", "Bu workspace'in işe yaradığını bize hangi sinyal göstermeli?")
+    .replace("Who is the first user or customer segment?", "İlk kullanıcı ya da müşteri segmenti kim?");
 }
 
 function getPlannerReadySourceText(plan: WorkspacePlan) {
@@ -2138,11 +2348,29 @@ function extractQuotedName(text: string) {
 }
 
 function extractNamedField(text: string, kind: "workspace" | "company") {
-  const match = text.match(
-    new RegExp(`\\b${kind}\\b\\s*(?:name)?\\s*(?:is|should be|=|:)\\s*([A-Za-z0-9][A-Za-z0-9 _.-]{2,40})`, "i")
-  );
+  const kindTerms =
+    kind === "workspace"
+      ? ["workspace", "workspace name", "project", "project name", "proje", "proje adı", "proje ismi"]
+      : ["company", "company name", "firma", "firma adı", "şirket", "şirket adı", "company name"];
+  const patterns = [
+    new RegExp(
+      `\\b(?:${kindTerms.join("|")})\\b\\s*(?:name|adı|ismi)?\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
+      "iu"
+    ),
+    new RegExp(
+      `\\b(?:adı|ismi|name)\\b\\s*(?:${kindTerms.join("|")})?\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
+      "iu"
+    )
+  ];
 
-  return match?.[1]?.trim();
+  for (const pattern of patterns) {
+    const value = sanitizeExtractedName(text.match(pattern)?.[1]?.trim() ?? "");
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function extractAssignedName(text: string, kind: "workspace" | "company") {
@@ -2150,11 +2378,13 @@ function extractAssignedName(text: string, kind: "workspace" | "company") {
     kind === "company"
       ? [
           /\b(?:company|company name|firma|firmaya|şirket|şirkete|project|proje)\b\s+([A-Za-z0-9][A-Za-z0-9 ._-]{1,40}?)\s+(?:diyelim|olsun|olacak|koyalım|verelim)/i,
-          /\b(?:company|firma|şirket)\b(?:\s+adı|\s+ismi|\s+name)?\s*(?:is|olsun|=|:)?\s*([A-Za-z0-9][A-Za-z0-9 ._-]{1,40})/i
+          /\b(?:company|firma|şirket)\b(?:\s+adı|\s+ismi|\s+name)?\s*(?:is|olsun|=|:)?\s*([A-Za-z0-9][A-Za-z0-9 ._-]{1,40})/i,
+          /\b([\p{L}\p{N}][\p{L}\p{N}._-]{1,40}(?:\s+[\p{L}\p{N}][\p{L}\p{N}._-]{1,40}){0,2})\s+diye\b/iu
         ]
       : [
           /\b(?:workspace|workspace name|project|project name|proje|projeye)\b\s+([A-Za-z0-9][A-Za-z0-9 ._-]{1,40}?)\s+(?:diyelim|olsun|olacak|koyalım|verelim)/i,
-          /\b(?:workspace|project|proje)\b(?:\s+adı|\s+ismi|\s+name)?\s*(?:is|olsun|=|:)?\s*([A-Za-z0-9][A-Za-z0-9 ._-]{1,40})/i
+          /\b(?:workspace|project|proje)\b(?:\s+adı|\s+ismi|\s+name)?\s*(?:is|olsun|=|:)?\s*([A-Za-z0-9][A-Za-z0-9 ._-]{1,40})/i,
+          /\b([\p{L}\p{N}][\p{L}\p{N}._-]{1,40}(?:\s+[\p{L}\p{N}][\p{L}\p{N}._-]{1,40}){0,2})\s+diye\b/iu
         ];
 
   for (const pattern of patterns) {
@@ -2255,6 +2485,35 @@ function addDetectedScope(plan: WorkspacePlan, text: string) {
   }
 }
 
+function addDetectedRequestedAgents(plan: WorkspacePlan, lower: string) {
+  const requestedAssistant = /\b(şahsi asistan|kişisel asistan|personal assistant|executive assistant)\b/i.test(lower);
+
+  if (requestedAssistant && !plan.team.persistentAgents.some((agent) => /assistant/i.test(`${agent.id} ${agent.role} ${agent.name}`))) {
+    plan.team.persistentAgents = [
+      createPlannerAgentSpec({
+        id: "personal-assistant",
+        role: "Personal Assistant",
+        name: "Personal Assistant",
+        purpose: "Own personal coordination, reminders, executive support, and operator handoffs.",
+        responsibilities: [
+          "Track the operator's priorities and reminders",
+          "Prepare concise handoffs and action lists",
+          "Handle lightweight coordination and follow-through"
+        ],
+        outputs: ["daily brief", "priority queue", "assistant handoff"],
+        enabled: true
+      }),
+      ...plan.team.persistentAgents
+    ];
+
+    if (plan.intake.size === "small") {
+      plan.intake.size = "medium";
+    } else if (plan.intake.size === "medium") {
+      plan.intake.size = "large";
+    }
+  }
+}
+
 function extractUrls(text: string) {
   const explicitUrls = text.match(/https?:\/\/[^\s)]+/g) ?? [];
   const bareDomains =
@@ -2303,6 +2562,8 @@ function sanitizeExtractedName(value: string) {
   return sanitizeExtractedText(value)
     .replace(/\b(projesi|projesini|workspace|project|company|firma|şirket)\b/gi, " ")
     .replace(/\b(yapal[ıi]m|ekleyelim|kural[ıi]m|başlatal[ıi]m|olsun|diyelim|verelim|koyal[ıi]m)\b/gi, " ")
+    .replace(/\b(yeni|bir)\b/gi, " ")
+    .replace(/\b(diye|olarak|benim|bide|bir de|için)\b.*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
 }

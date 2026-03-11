@@ -71,6 +71,7 @@ export function useWorkspaceWizardDraft({
   const [deployProgress, setDeployProgress] = useState<OperationProgressSnapshot | null>(null);
   const [createProgress, setCreateProgress] = useState<OperationProgressSnapshot | null>(null);
   const [sendProgressStep, setSendProgressStep] = useState(0);
+  const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const planRequestRef = useRef<Promise<WorkspacePlan | null> | null>(null);
 
   const sourceAnalysis = useMemo(
@@ -218,6 +219,7 @@ export function useWorkspaceWizardDraft({
     setIsSimulating(false);
     setIsDeploying(false);
     setIsCreating(false);
+    setPendingUserMessage(null);
     planRequestRef.current = null;
 
     if (mode === "basic") {
@@ -512,6 +514,7 @@ export function useWorkspaceWizardDraft({
       }
 
       setIsSending(true);
+      setPendingUserMessage(message.trim());
 
       try {
         const shouldResumeStoredPlan =
@@ -555,6 +558,7 @@ export function useWorkspaceWizardDraft({
         });
         return false;
       } finally {
+        setPendingUserMessage(null);
         setIsSending(false);
       }
     },
@@ -574,18 +578,22 @@ export function useWorkspaceWizardDraft({
           return;
         }
 
-        const importedPlan = appendBasicModeImportNote(
-          applyBasicInputToWorkspacePlan(ensuredPlan, basicDraft),
-          basicDraft
-        );
+        const seededPlan = applyBasicInputToWorkspacePlan(ensuredPlan, basicDraft);
+        const shouldAppendImportNote =
+          !seededPlan.intake.started &&
+          seededPlan.conversation.filter((message) => message.role !== "system").length <= 1;
+        const importedPlan = shouldAppendImportNote
+          ? appendBasicModeImportNote(seededPlan, basicDraft)
+          : seededPlan;
 
         commitPlan(importedPlan);
         setNotice(
-          basicDraft.goal.trim() || basicDraft.source.trim()
+          importedPlan.intake.started || basicDraft.goal.trim() || basicDraft.source.trim()
             ? {
                 tone: "muted",
-                title: "Quick setup imported",
-                description: "Architect mode picked up your fast-path assumptions and will keep extending the same draft."
+                title: "Same draft, deeper controls",
+                description:
+                  "Architect will keep extending the exact same conversation and blueprint as you move into Advanced."
               }
             : null
         );
@@ -667,6 +675,7 @@ export function useWorkspaceWizardDraft({
       setNotice(null);
       setCreateProgress(null);
       setDeployProgress(null);
+      setPendingUserMessage(null);
       planRequestRef.current = null;
       return;
     }
@@ -676,6 +685,7 @@ export function useWorkspaceWizardDraft({
     setNotice(null);
     setCreateProgress(null);
     setDeployProgress(null);
+    setPendingUserMessage(null);
     planRequestRef.current = null;
 
     if (initialMode === "advanced") {
@@ -720,6 +730,7 @@ export function useWorkspaceWizardDraft({
     createProgress,
     deployProgress,
     architectBusyStatus,
+    pendingUserMessage,
     setBasicGoal,
     setBasicSource,
     setBasicName,

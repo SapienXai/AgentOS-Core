@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUp, LoaderCircle } from "lucide-react";
-import type { FormEvent, KeyboardEvent, ReactNode } from "react";
+import { useEffect, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -32,7 +32,19 @@ export function WizardComposer({
   toolbar,
   className
 }: WizardComposerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const canSubmit = Boolean(value.trim()) && !disabled;
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+  }, [value]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -72,12 +84,13 @@ export function WizardComposer({
       )}
     >
       <textarea
+        ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className={cn(
-          "min-h-[44px] max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1 text-[15px] leading-6 outline-none",
+          "min-h-[44px] max-h-[200px] w-full resize-none overflow-y-auto border-0 bg-transparent px-2 py-1 text-[15px] leading-6 outline-none",
           isLight ? "text-[#191714] placeholder:text-[#9b948c]" : "text-slate-100 placeholder:text-slate-500"
         )}
       />

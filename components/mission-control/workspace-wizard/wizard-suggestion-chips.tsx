@@ -13,6 +13,7 @@ type WizardSuggestionChipsProps = {
   surfaceTheme: SurfaceTheme;
   chips: SuggestionChip[];
   onSelect: (chip: SuggestionChip) => void;
+  disabled?: boolean;
   className?: string;
 };
 
@@ -20,6 +21,7 @@ export function WizardSuggestionChips({
   surfaceTheme,
   chips,
   onSelect,
+  disabled = false,
   className
 }: WizardSuggestionChipsProps) {
   if (chips.length === 0) {
@@ -35,8 +37,9 @@ export function WizardSuggestionChips({
           key={chip.id}
           type="button"
           onClick={() => onSelect(chip)}
+          disabled={disabled}
           className={cn(
-            "inline-flex min-h-8 items-center rounded-full border px-4 py-1.5 text-left text-[12px] transition-colors",
+            "inline-flex min-h-8 items-center rounded-full border px-4 py-1.5 text-left text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
             isLight
               ? "border-[#ddd7cf] bg-white text-[#4a443f] hover:border-[#cfc7bc] hover:bg-[#f3efe8]"
               : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.08] hover:text-white"

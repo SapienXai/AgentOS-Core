@@ -49,7 +49,26 @@ const ignoredNameTokens = new Set([
   "the",
   "to",
   "up",
-  "workspace"
+  "workspace",
+  "adı",
+  "agent",
+  "ajan",
+  "asistan",
+  "benim",
+  "bide",
+  "bir",
+  "birde",
+  "de",
+  "diye",
+  "ekleyelim",
+  "gibi",
+  "için",
+  "olarak",
+  "olsun",
+  "proje",
+  "şahsi",
+  "verelim",
+  "yeni"
 ]);
 
 export function createInitialWorkspaceWizardBasicDraft(): WorkspaceWizardBasicDraft {
@@ -152,7 +171,7 @@ export function inferWorkspaceWizardName(source: string, goal: string) {
     return sourceName;
   }
 
-  const quotedName = goal.match(/["“]([^"”]+)["”]/)?.[1]?.trim();
+  const quotedName = extractExplicitGoalName(goal);
   if (quotedName) {
     return quotedName;
   }
@@ -236,6 +255,35 @@ function inferNameFromSource(source: string) {
   }
 
   return undefined;
+}
+
+function extractExplicitGoalName(goal: string) {
+  const quotedName = goal.match(/["“]([^"”]+)["”]/)?.[1]?.trim();
+  if (quotedName) {
+    return quotedName;
+  }
+
+  const patterns = [
+    /\b(?:adı|ismi|name)\s*(?:olarak|:|=)?\s*([\p{L}\p{N}][\p{L}\p{N}._-]{1,40}(?:\s+[\p{L}\p{N}][\p{L}\p{N}._-]{1,40}){0,2})(?=\s+(?:olsun|olacak|diyelim|verelim|koyalım|olarak|için)\b|[.!?,]|$)/iu,
+    /\b([\p{L}\p{N}][\p{L}\p{N}._-]{1,40}(?:\s+[\p{L}\p{N}][\p{L}\p{N}._-]{1,40}){0,2})\s+diye\b/iu
+  ];
+
+  for (const pattern of patterns) {
+    const value = sanitizeGoalName(goal.match(pattern)?.[1] ?? "");
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function sanitizeGoalName(value: string) {
+  return value
+    .replace(/\b(yeni|bir|workspace|project|proje|ekleyelim|kuralım|başlatalım|oluşturalım)\b/giu, " ")
+    .replace(/\b(diye|olarak|benim|bide|bir de)\b.*$/iu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isLikelyExistingPath(value: string) {

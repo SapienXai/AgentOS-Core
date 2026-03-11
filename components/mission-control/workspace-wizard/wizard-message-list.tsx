@@ -13,11 +13,14 @@ export type WizardMessageRecord = {
   role: "assistant" | "user" | "system";
   author?: string;
   text: string;
+  status?: "ready" | "pending";
 };
 
 type WizardMessageListProps = {
   surfaceTheme: SurfaceTheme;
   messages: WizardMessageRecord[];
+  isTyping?: boolean;
+  typingLabel?: string;
   emptyState?: ReactNode;
   auxiliary?: ReactNode;
   className?: string;
@@ -26,6 +29,8 @@ type WizardMessageListProps = {
 export function WizardMessageList({
   surfaceTheme,
   messages,
+  isTyping = false,
+  typingLabel = "Typing…",
   emptyState,
   auxiliary,
   className
@@ -36,7 +41,7 @@ export function WizardMessageList({
     endRef.current?.scrollIntoView({
       block: "end"
     });
-  }, [messages]);
+  }, [isTyping, messages]);
 
   return (
     <ScrollArea className={cn("h-full", className)}>
@@ -47,6 +52,8 @@ export function WizardMessageList({
         {messages.map((message) => (
           <MessageBubble key={message.id} message={message} surfaceTheme={surfaceTheme} />
         ))}
+
+        {isTyping ? <TypingBubble surfaceTheme={surfaceTheme} label={typingLabel} /> : null}
 
         <div ref={endRef} className="h-6 w-full shrink-0" />
       </div>
@@ -82,6 +89,7 @@ function MessageBubble({
   }
 
   const isUser = message.role === "user";
+  const isPending = message.status === "pending";
 
   return (
     <div
@@ -112,7 +120,8 @@ function MessageBubble({
               : "rounded-[22px] bg-cyan-300 px-4 py-2.5 text-slate-950"
             : isLight
               ? "px-0 py-0 text-[#1b1815]"
-              : "px-0 py-0 text-slate-100"
+              : "px-0 py-0 text-slate-100",
+          isPending && "opacity-75"
         )}
       >
         {!isUser && message.author ? (
@@ -121,6 +130,50 @@ function MessageBubble({
           </p>
         ) : null}
         <p className={cn("whitespace-pre-wrap text-[15px] leading-7", isUser && "leading-6")}>{message.text}</p>
+      </div>
+    </div>
+  );
+}
+
+function TypingBubble({
+  surfaceTheme,
+  label
+}: {
+  surfaceTheme: SurfaceTheme;
+  label: string;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div className="flex w-full items-start gap-3">
+      <div
+        className={cn(
+          "mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full border",
+          isLight
+            ? "border-[#e6dfd4] bg-white text-[#5f5a53]"
+            : "border-white/10 bg-white/[0.05] text-slate-300"
+        )}
+      >
+        <Bot className="h-3.5 w-3.5" />
+      </div>
+
+      <div className="max-w-[min(100%,720px)]">
+        <p className={cn("mb-1 text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#8f857a]" : "text-slate-500")}>
+          Architect
+        </p>
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-2",
+              isLight ? "border-[#e6dfd5] bg-white text-[#5a534c]" : "border-white/10 bg-white/[0.05] text-slate-300"
+            )}
+          >
+            <span className={cn("inline-flex size-1.5 animate-pulse rounded-full", isLight ? "bg-[#5a534c]" : "bg-slate-300")} />
+            <span className={cn("inline-flex size-1.5 animate-pulse rounded-full [animation-delay:120ms]", isLight ? "bg-[#5a534c]" : "bg-slate-300")} />
+            <span className={cn("inline-flex size-1.5 animate-pulse rounded-full [animation-delay:240ms]", isLight ? "bg-[#5a534c]" : "bg-slate-300")} />
+          </div>
+          <p className={cn("text-[13px] leading-6", isLight ? "text-[#6f685f]" : "text-slate-400")}>{label}</p>
+        </div>
       </div>
     </div>
   );

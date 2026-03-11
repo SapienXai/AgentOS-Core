@@ -66,7 +66,7 @@ export function WorkspaceWizardHeader({
                 Create workspace
               </h2>
               <p className={cn("text-[13px]", isLight ? "text-[#604c3f]" : "text-slate-300")}>
-                One wizard, two depths. Basic stays fast; Advanced keeps the same draft and design language.
+                Talk to Architect once. Stay on the fast path or open the full blueprint without losing the draft.
               </p>
             </div>
           </div>

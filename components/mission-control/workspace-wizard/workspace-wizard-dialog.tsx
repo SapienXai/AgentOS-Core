@@ -28,8 +28,7 @@ import {
 } from "@/lib/openclaw/planner-presenters";
 import type {
   MissionControlSnapshot,
-  WorkspacePlan,
-  WorkspaceTemplate
+  WorkspacePlan
 } from "@/lib/openclaw/types";
 import {
   buildWorkspaceWizardPathPreview,
@@ -94,15 +93,13 @@ export function WorkspaceWizardDialog({
     onWorkspaceCreated
   });
 
-  const [basicComposerValue, setBasicComposerValue] = useState("");
-  const [advancedComposerValue, setAdvancedComposerValue] = useState("");
+  const [composerValue, setComposerValue] = useState("");
   const [isMobileBlueprintOpen, setIsMobileBlueprintOpen] = useState(false);
   const isLight = surfaceTheme === "light";
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
-      setBasicComposerValue("");
-      setAdvancedComposerValue("");
+      setComposerValue("");
       setIsMobileBlueprintOpen(false);
     }
 
@@ -121,90 +118,64 @@ export function WorkspaceWizardDialog({
 
   const headerBadges = useMemo(() => buildHeaderBadges(wizard.mode, wizard.plan), [wizard.mode, wizard.plan]);
 
-  const basicMessages = useMemo<WizardMessageRecord[]>(() => {
-    if (!wizard.basicDraft.goal.trim()) {
-      return [];
-    }
-
-    return [
-      {
-        id: "basic-user-intent",
-        role: "user",
-        text: wizard.basicDraft.goal.trim()
-      },
-      {
-        id: "basic-architect-summary",
-        role: "assistant",
-        author: "Architect",
-        text: `I am setting up ${resolvedName} as a ${humanizeTemplate(resolvedTemplate).toLowerCase()} workspace. ${
-          wizard.sourceAnalysis.kind === "empty"
-            ? "This will start from a clean scaffold."
-            : `I will start from ${wizard.sourceAnalysis.label.toLowerCase()} and keep the fast path intact.`
-        }`
-      }
-    ];
-  }, [resolvedName, resolvedTemplate, wizard.basicDraft.goal, wizard.sourceAnalysis.kind, wizard.sourceAnalysis.label]);
-
-  const advancedMessages = useMemo<WizardMessageRecord[]>(
-    () =>
-      wizard.plan?.conversation.map((message) => ({
-        id: message.id,
-        role: message.role,
-        author:
-          message.role === "assistant"
-            ? "Architect"
-            : message.role === "system"
-              ? "Workspace Wizard"
-              : message.author,
-        text: message.text
-      })) ?? [],
-    [wizard.plan]
+  const activeMessages = useMemo<WizardMessageRecord[]>(
+    () => buildConversationMessages(wizard.plan, wizard.pendingUserMessage),
+    [wizard.pendingUserMessage, wizard.plan]
   );
 
-  const activeMessages = wizard.mode === "basic" ? basicMessages : advancedMessages;
-  const activeSuggestions =
-    wizard.mode === "basic"
-      ? basicSuggestions
-      : (wizard.plan?.intake.suggestedReplies ?? [])
-          .filter((value) => value.trim().length > 0)
-          .map((value, index) => ({
-            id: `reply-${index}`,
-            label: value,
-            prompt: value
-          }))
-          .slice(0, 4);
+  const activeSuggestions = useMemo(() => {
+    const suggestedReplies = (wizard.plan?.intake.suggestedReplies ?? [])
+      .filter((value) => value.trim().length > 0)
+      .map((value, index) => ({
+        id: `reply-${index}`,
+        label: value,
+        prompt: value
+      }))
+      .slice(0, 4);
 
-  const activeProgress = wizard.isCreating ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null;
-
-  const submitBasicIntent = async () => {
-    const nextGoal = basicComposerValue.trim();
-
-    if (!nextGoal) {
-      return;
+    if (suggestedReplies.length > 0) {
+      return suggestedReplies;
     }
 
-    wizard.setBasicGoal(nextGoal);
-    setBasicComposerValue("");
-  };
+    return wizard.plan?.intake.started ? [] : basicSuggestions;
+  }, [wizard.plan?.intake.started, wizard.plan?.intake.suggestedReplies]);
 
-  const submitAdvancedIntent = async () => {
-    const nextMessage = advancedComposerValue.trim();
+  const activeProgress = wizard.isCreating ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null;
+  const isArchitectBusy = wizard.isSending || wizard.isPlanLoading || wizard.isDeploying || wizard.isCreating;
+  const hasDraftToCreate = Boolean(
+    wizard.plan?.intake.started || wizard.basicDraft.goal.trim() || composerValue.trim()
+  );
+
+  const submitComposerIntent = async (override?: string) => {
+    const nextMessage = (override ?? composerValue).trim();
 
     if (!nextMessage) {
-      return;
+      return false;
+    }
+
+    const previousValue = composerValue;
+    const isDirectComposerSubmit = typeof override === "undefined";
+
+    if (isDirectComposerSubmit) {
+      setComposerValue("");
     }
 
     const success = await wizard.submitArchitectTurn(nextMessage);
 
-    if (success) {
-      setAdvancedComposerValue("");
+    if (!success && isDirectComposerSubmit) {
+      setComposerValue(previousValue);
     }
+
+    return success;
   };
 
   const handleCreateWorkspace = async () => {
-    if (basicComposerValue.trim() && !wizard.basicDraft.goal.trim()) {
-      wizard.setBasicGoal(basicComposerValue.trim());
-      setBasicComposerValue("");
+    if (composerValue.trim()) {
+      const success = await submitComposerIntent();
+
+      if (!success) {
+        return;
+      }
     }
 
     const result = await wizard.createWorkspace();
@@ -250,8 +221,7 @@ export function WorkspaceWizardDialog({
               void wizard.switchMode(mode);
             }}
             onNewDraft={() => {
-              setBasicComposerValue("");
-              setAdvancedComposerValue("");
+              setComposerValue("");
               setIsMobileBlueprintOpen(false);
               void wizard.startFreshDraft();
             }}
@@ -267,7 +237,7 @@ export function WorkspaceWizardDialog({
               }
             >
               <div className="flex min-h-0 flex-1 flex-col">
-                {wizard.mode === "advanced" && wizard.architectBusyStatus ? (
+                {wizard.architectBusyStatus ? (
                   <div className={isLight ? "border-b border-[#ece5db] px-4 py-3 md:px-5" : "border-b border-white/10 px-4 py-3 md:px-5"}>
                     <div className={isLight ? "rounded-[18px] border border-[#e6dfd5] bg-white px-4 py-3" : "rounded-[18px] border border-white/10 bg-white/[0.04] px-4 py-3"}>
                       <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#8b7262]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
@@ -284,17 +254,26 @@ export function WorkspaceWizardDialog({
                   <WizardMessageList
                     surfaceTheme={surfaceTheme}
                     messages={activeMessages}
+                    isTyping={wizard.isSending}
+                    typingLabel="Architect is shaping the next pass..."
                     emptyState={
-                      wizard.mode === "basic" ? (
-                        <BasicGreeting surfaceTheme={surfaceTheme} />
-                      ) : wizard.isPlanLoading ? (
+                      wizard.isPlanLoading && activeMessages.length === 0 ? (
                         <LoadingGreeting surfaceTheme={surfaceTheme} />
-                      ) : (
+                      ) : activeMessages.length === 0 && wizard.mode === "basic" ? (
+                        <BasicGreeting surfaceTheme={surfaceTheme} />
+                      ) : activeMessages.length === 0 ? (
                         <AdvancedGreeting surfaceTheme={surfaceTheme} />
-                      )
+                      ) : null
                     }
                     auxiliary={
-                      wizard.mode === "basic" ? (
+                      activeProgress ? (
+                        <div className="mx-auto w-full max-w-3xl">
+                          <OperationProgress
+                            progress={activeProgress}
+                            className={isLight ? "border-[#e6dfd5] bg-white" : "border-white/10 bg-slate-950/50"}
+                          />
+                        </div>
+                      ) : wizard.mode === "basic" && !wizard.plan?.intake.started && !wizard.pendingUserMessage ? (
                         <BasicQuickStartCard
                           surfaceTheme={surfaceTheme}
                           name={wizard.basicDraft.name}
@@ -302,13 +281,6 @@ export function WorkspaceWizardDialog({
                           onNameChange={wizard.setBasicName}
                           onSourceChange={wizard.setBasicSource}
                         />
-                      ) : activeProgress ? (
-                        <div className="mx-auto w-full max-w-3xl">
-                          <OperationProgress
-                            progress={activeProgress}
-                            className={isLight ? "border-[#e6dfd5] bg-white" : "border-white/10 bg-slate-950/50"}
-                          />
-                        </div>
                       ) : null
                     }
                   />
@@ -329,52 +301,39 @@ export function WorkspaceWizardDialog({
                       id: chip.id,
                       label: chip.label
                     }))}
+                    disabled={isArchitectBusy}
                     onSelect={(chip) => {
                       const selected = activeSuggestions.find((entry) => entry.id === chip.id);
                       if (!selected) {
                         return;
                       }
 
-                      if (wizard.mode === "basic") {
-                        setBasicComposerValue(selected.prompt);
-                        return;
-                      }
-
-                      setAdvancedComposerValue(selected.prompt);
+                      void submitComposerIntent(selected.prompt);
                     }}
                     className="mb-3"
                   />
 
                   <WizardComposer
                     surfaceTheme={surfaceTheme}
-                    value={wizard.mode === "basic" ? basicComposerValue : advancedComposerValue}
-                    onChange={(value) => {
-                      if (wizard.mode === "basic") {
-                        setBasicComposerValue(value);
-                        return;
-                      }
-
-                      setAdvancedComposerValue(value);
+                    value={composerValue}
+                    onChange={setComposerValue}
+                    onSubmit={async () => {
+                      await submitComposerIntent();
                     }}
-                    onSubmit={() => (wizard.mode === "basic" ? submitBasicIntent() : submitAdvancedIntent())}
                     placeholder={
                       wizard.mode === "basic"
-                        ? "Describe the workspace you want to create..."
-                        : "Tell Architect how the workspace should work..."
+                        ? "Tell Architect what this workspace should do first..."
+                        : "Keep shaping the workspace with Architect..."
                     }
-                    disabled={
-                      wizard.mode === "advanced"
-                        ? wizard.isSending || wizard.isPlanLoading || wizard.isDeploying
-                        : wizard.isCreating
-                    }
-                    isBusy={wizard.mode === "advanced" ? wizard.isSending : false}
+                    disabled={isArchitectBusy}
+                    isBusy={wizard.isSending}
                     helperText={
                       wizard.mode === "basic"
-                        ? "Send once to commit the goal, then create immediately or switch to Advanced."
+                        ? "Architect fills the draft live. Create the workspace as soon as the fast path looks right."
                         : "Architect updates the same structured draft with every turn."
                     }
                     toolbar={
-                      wizard.mode === "basic" ? (
+                      wizard.mode === "basic" && !wizard.plan ? (
                         <span
                           className={
                             isLight
@@ -382,7 +341,7 @@ export function WorkspaceWizardDialog({
                               : "inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-slate-300"
                           }
                         >
-                          Fast path
+                          Architect live
                         </span>
                       ) : wizard.plan ? (
                         <span
@@ -473,7 +432,7 @@ export function WorkspaceWizardDialog({
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <p className={isLight ? "text-[13px] text-[#776f65]" : "text-[13px] text-slate-300"}>
                 {wizard.mode === "basic"
-                  ? "Basic creates immediately with the fast-path defaults."
+                  ? "Basic stays fast, but the same Architect conversation keeps filling the draft underneath."
                   : "Advanced keeps the conversation and blueprint aligned through review and deploy."}
               </p>
 
@@ -505,9 +464,9 @@ export function WorkspaceWizardDialog({
                       onClick={() => {
                         void wizard.switchMode("advanced");
                       }}
-                      disabled={wizard.isCreating}
+                      disabled={wizard.isCreating || wizard.isSending || wizard.isPlanLoading}
                     >
-                      Open Architect mode
+                      Open full blueprint
                     </Button>
                     <Button
                       size="sm"
@@ -517,10 +476,10 @@ export function WorkspaceWizardDialog({
                           : "rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
                       }
                       onClick={() => void handleCreateWorkspace()}
-                      disabled={wizard.isCreating || (!wizard.basicDraft.goal.trim() && !basicComposerValue.trim())}
+                      disabled={wizard.isCreating || wizard.isSending || wizard.isPlanLoading || !hasDraftToCreate}
                     >
                       {wizard.isCreating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                      Create workspace now
+                      Create from this draft
                     </Button>
                   </>
                 ) : (
@@ -603,10 +562,10 @@ function BasicGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
   return (
     <div className="mx-auto mt-4 flex w-full max-w-3xl flex-col justify-center px-4 md:mt-16 md:px-8">
       <p className={isLight ? "text-[28px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[28px] font-semibold tracking-[-0.03em] text-white"}>
-        Start a workspace in one message.
+        Talk to Architect, then create fast.
       </p>
       <p className={isLight ? "mt-2 text-[28px] tracking-[-0.03em] text-[#7f756b]" : "mt-2 text-[28px] tracking-[-0.03em] text-slate-400"}>
-        Architect keeps the UI chat-native, even when you stay on the fast path.
+        Describe the outcome, paste a source, and let Architect fill the draft while keeping the fast path open.
       </p>
     </div>
   );
@@ -745,13 +704,21 @@ function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null
   }> = [
     {
       id: "surface",
-      label: mode === "basic" ? "Fast-path surface" : "Architect co-design",
+      label: mode === "basic" ? "Architect-assisted fast path" : "Architect co-design",
       tone: "muted"
     }
   ];
 
   if (!plan) {
     return badges;
+  }
+
+  if (plan.intake.confirmations.length > 0) {
+    badges.push({
+      id: "confirmations",
+      label: `${plan.intake.confirmations.length} decision${plan.intake.confirmations.length === 1 ? "" : "s"} needed`,
+      tone: plan.intake.confirmations.length > 1 ? "warning" : "muted"
+    });
   }
 
   badges.push({
@@ -782,10 +749,28 @@ function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null
   return badges;
 }
 
-function humanizeTemplate(template: WorkspaceTemplate) {
-  return template
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+function buildConversationMessages(plan: WorkspacePlan | null, pendingUserMessage: string | null) {
+  const messages: WizardMessageRecord[] =
+    plan?.conversation.map((message) => ({
+      id: message.id,
+      role: message.role,
+      author:
+        message.role === "assistant"
+          ? "Architect"
+          : message.role === "system"
+            ? "Workspace Wizard"
+            : message.author,
+      text: message.text
+    })) ?? [];
+
+  if (pendingUserMessage?.trim()) {
+    messages.push({
+      id: "pending-user-message",
+      role: "user",
+      text: pendingUserMessage.trim(),
+      status: "pending"
+    });
+  }
+
+  return messages;
 }

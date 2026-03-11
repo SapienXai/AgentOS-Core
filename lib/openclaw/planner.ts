@@ -10,7 +10,6 @@ import {
   createOperationProgressTracker
 } from "@/lib/openclaw/operation-progress";
 import {
-  applyPlannerInput,
   applyPlannerTemplate,
   createPlannerAgentSpec,
   createPlannerAutomationSpec,
@@ -200,6 +199,9 @@ type PlannerArchitectAgentResponse = {
   patch?: PlannerAgentPatch;
   mode?: PlannerExperienceMode | null;
   reviewRequested?: boolean | null;
+  assumptions?: string[];
+  suggestions?: string[];
+  questions?: string[];
 };
 
 type PlannerAdvisorAgentResponse = {
@@ -258,16 +260,15 @@ export async function submitWorkspacePlanTurn(
   }
   nextPlan.intake.latestPrompt = trimmedMessage;
   nextPlan.intake.sources = mergePlannerSources(nextPlan.intake.sources, harvestedContext.sources);
-  nextPlan = applyPlannerInput(nextPlan, trimmedMessage);
-  nextPlan = applyHarvestedDefaults(nextPlan, harvestedContext);
-  nextPlan = enrichWorkspacePlan(nextPlan);
-  nextPlan.intake.sources = mergePlannerSources(nextPlan.intake.sources, harvestedContext.sources);
   nextPlan = enrichWorkspacePlan(nextPlan);
 
   const runtimeReadyPlan = await ensurePlannerRuntime(nextPlan);
-  const advisorNotes = runtimeReadyPlan.autopilot
+  const shouldUseAdvisorBoard =
+    runtimeReadyPlan.autopilot &&
+    (runtimeReadyPlan.intake.reviewRequested || runtimeReadyPlan.intake.turnCount > 2);
+  const advisorNotes = shouldUseAdvisorBoard
     ? await synthesizePlannerAdvisorsWithRuntime(runtimeReadyPlan, trimmedMessage)
-    : runtimeReadyPlan.advisorNotes;
+    : [];
   runtimeReadyPlan.advisorNotes = advisorNotes;
   const architectTurn = await runArchitectPlannerTurn(
     runtimeReadyPlan,
@@ -603,14 +604,23 @@ You are the primary planning agent for Mission Control.
   "reply": "short natural language response to the operator",
   "mode": "guided | advanced | null",
   "reviewRequested": true,
+  "assumptions": ["assumption you took proactively"],
+  "suggestions": ["recommended next move or stronger default"],
+  "questions": ["only if a decision would materially change the design"],
   "patch": {}
 }
 
 ## Rules
 - Keep momentum. Prefer a concrete draft over hesitation.
-- Keep the reply concise and specific.
-- Ask at most two questions.
-- When the operator names the company or workspace, apply it.
+- Keep the reply concise and specific, but make the patch rich and complete.
+- Treat natural language as enough. Do not wait for rigid field-by-field phrasing.
+- Ask at most one high-value question unless multiple missing decisions would materially change the architecture.
+- When the operator names the company or workspace, apply it immediately.
+- If the operator asks for a role in plain language, create or adapt a persistent agent for that role.
+- Example: if the operator says "şahsi asistan ekleyelim" or "add a personal assistant", add a persistent agent like { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant", ... }.
+- Infer likely defaults and say what you assumed instead of bouncing the decision back by default.
+- Give proactive suggestions when you see a stronger workspace shape, cleaner V1, or better agent split.
+- Use patch as the source of truth. The planner layer should not need to infer intent for you.
 - When a domain or website implies a likely brand name, use it unless contradicted.
 - Treat Mission Control as the source of truth. Patch only the fields that should change.
 `,
@@ -867,9 +877,10 @@ async function runArchitectPlannerTurn(
   previousPlan?: WorkspacePlan
 ) {
   if (plan.runtime.mode !== "agent" || plan.runtime.status !== "ready" || !plan.runtime.architectAgentId) {
+    const fallbackPlan = enrichWorkspacePlan(applyHarvestedDefaults(plan, harvestedContext));
     return {
-      plan,
-      reply: createArchitectReply(plan, advisorNotes, latestMessage, previousPlan).text
+      plan: fallbackPlan,
+      reply: createArchitectReply(fallbackPlan, advisorNotes, latestMessage, previousPlan).text
     };
   }
 
@@ -904,13 +915,14 @@ async function runArchitectPlannerTurn(
 
     return {
       plan: enrichWorkspacePlan(nextPlan),
-      reply:
-        result.response.reply?.trim() ||
+      reply: formatArchitectAgentReply(
+        result.response,
         createArchitectReply(nextPlan, advisorNotes, latestMessage, previousPlan).text
+      )
     };
   } catch (error) {
     const fallbackPlan = enrichWorkspacePlan({
-      ...plan,
+      ...applyHarvestedDefaults(plan, harvestedContext),
       runtime: createPlannerRuntimeState(plan.id, {
         ...plan.runtime,
         mode: "fallback",
@@ -973,17 +985,26 @@ function buildPlannerArchitectPrompt(
   return [
     "You are Workspace Architect, the primary planning agent inside Mission Control.",
     "Return valid JSON only. Do not wrap the JSON in markdown fences.",
-    'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":true,"patch":{}}',
+    'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":true,"assumptions":["..."],"suggestions":["..."],"questions":["..."],"patch":{}}',
     "Rules:",
     "- Prefer drafting likely decisions instead of asking for every missing field.",
+    "- Treat yourself as the primary intelligence layer. The planner should persist and validate state, not interpret the operator for you.",
     "- If the operator asks you to infer, extract, or fill missing details from linked context, fill every plausible field before asking follow-up questions.",
     "- Ask at most one high-value question when harvested context already includes a website or repo.",
     "- Do not ask about non-goals, polish, or V1 exclusions until mission, audience, and offer are already grounded.",
     "- Keep reply concise, concrete, and operator-facing.",
+    "- Reply in the same language as the operator's latest message.",
+    "- Treat colloquial Turkish and informal phrasing as first-class input. Infer names, roles, and intent from natural speech instead of waiting for rigid formatting.",
     "- When the operator gives a company or workspace name, apply it immediately.",
+    "- Take initiative. If the intent is clear but some details are ambiguous, choose the likeliest workable default, apply it, and tell the operator what you assumed.",
+    "- If the operator asks for a role or agent in plain language, add or adapt a persistent agent for that role instead of asking them to restate it formally.",
+    '- Example: "şahsi asistan ekleyelim" should produce a persistent agent patch such as { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant" } with a sensible purpose and outputs.',
+    "- Give recommendations proactively when you see a stronger default, clearer role split, or cleaner V1 path.",
     "- When a domain implies a likely brand name, use it unless contradicted.",
     "- When you still need confirmation after reading a source, state what you inferred first and ask only for the remaining ambiguity.",
     "- Respect the selected workspace size. Keep the operator-facing chat as lean as the selected size, but still complete the underlying project context and blueprint.",
+    "- Use patch aggressively. Update company, product, workspace, agents, workflows, automations, and channels whenever the operator intent is clear enough.",
+    "- When adding a new agent, generate a stable slug id and include role, name, purpose, responsibilities, and outputs.",
     "- Patch only fields that should change.",
     "",
     "Context JSON:",
@@ -1050,13 +1071,50 @@ function buildPlannerAdvisorPrompt(
   ].join("\n");
 }
 
+function formatArchitectAgentReply(
+  response: PlannerArchitectAgentResponse,
+  fallbackReply: string
+) {
+  const isTurkish = /[çğıöşüÇĞİÖŞÜ]/.test(response.reply ?? "") || /\b(ve|bir|için|ile|olarak|hedef|ilk|şu|bu)\b/i.test(response.reply ?? "");
+  const sections = [
+    response.reply?.trim(),
+    response.assumptions?.length
+      ? `${isTurkish ? "Varsayımlar" : "Assumptions"}: ${uniqueStrings(response.assumptions).slice(0, 2).join(" | ")}`
+      : "",
+    response.suggestions?.length
+      ? `${isTurkish ? "Öneriler" : "Suggestions"}: ${uniqueStrings(response.suggestions).slice(0, 2).join(" | ")}`
+      : "",
+    response.questions?.length
+      ? `${isTurkish ? "Sıradaki karar" : "Next decision"}: ${uniqueStrings(response.questions).slice(0, 1).join(" | ")}`
+      : ""
+  ].filter(Boolean);
+
+  return sections.join("\n\n") || fallbackReply;
+}
+
 function createPlannerPromptContext(plan: WorkspacePlan) {
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+  const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled);
+  const enabledWorkflows = plan.operations.workflows.filter((workflow) => workflow.enabled);
+  const enabledAutomations = plan.operations.automations.filter((automation) => automation.enabled);
 
   return {
     company: plan.company,
     product: plan.product,
     workspace: plan.workspace,
+    currentOperatingShape: {
+      enabledAgents: enabledAgents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        role: agent.role,
+        isPrimary: agent.isPrimary
+      })),
+      enabledWorkflowCount: enabledWorkflows.length,
+      enabledAutomationCount: enabledAutomations.length,
+      enabledExternalChannels: plan.operations.channels
+        .filter((channel) => channel.enabled && channel.type !== "internal")
+        .map((channel) => channel.name)
+    },
     team: {
       persistentAgents: plan.team.persistentAgents,
       allowEphemeralSubagents: plan.team.allowEphemeralSubagents,
