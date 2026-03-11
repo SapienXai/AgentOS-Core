@@ -17,8 +17,7 @@ import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
-import { WorkspaceCreateDialog } from "@/components/mission-control/workspace-create-dialog";
-import { WorkspacePlannerDialog } from "@/components/mission-control/workspace-planner-dialog";
+import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -129,8 +128,8 @@ export function MissionControlShell({
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
-  const [isWorkspaceCreateOpen, setIsWorkspaceCreateOpen] = useState(false);
-  const [isWorkspacePlannerOpen, setIsWorkspacePlannerOpen] = useState(false);
+  const [isWorkspaceWizardOpen, setIsWorkspaceWizardOpen] = useState(false);
+  const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
@@ -1114,8 +1113,14 @@ export function MissionControlShell({
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
             onRefresh={refresh}
-            onOpenWorkspaceCreate={() => setIsWorkspaceCreateOpen(true)}
-            onOpenWorkspacePlanner={() => setIsWorkspacePlannerOpen(true)}
+            onOpenWorkspaceCreate={() => {
+              setWorkspaceWizardInitialMode("basic");
+              setIsWorkspaceWizardOpen(true);
+            }}
+            onOpenWorkspacePlanner={() => {
+              setWorkspaceWizardInitialMode("advanced");
+              setIsWorkspaceWizardOpen(true);
+            }}
             onMissionResponse={setLastMission}
             onMissionDispatchStart={setPendingMission}
             onMissionDispatchComplete={(status) => {
@@ -1170,24 +1175,11 @@ export function MissionControlShell({
           />
         ) : null}
 
-        <WorkspaceCreateDialog
-          open={isWorkspaceCreateOpen}
-          onOpenChange={setIsWorkspaceCreateOpen}
-          onOpenAdvanced={() => {
-            setIsWorkspaceCreateOpen(false);
-            setIsWorkspacePlannerOpen(true);
-          }}
-          snapshot={snapshot}
-          onRefresh={refresh}
-          onWorkspaceCreated={(workspaceId) => {
-            setActiveWorkspaceId(workspaceId);
-            setSelectedNodeId(workspaceId);
-          }}
-        />
-
-        <WorkspacePlannerDialog
-          open={isWorkspacePlannerOpen}
-          onOpenChange={setIsWorkspacePlannerOpen}
+        <WorkspaceWizardDialog
+          open={isWorkspaceWizardOpen}
+          onOpenChange={setIsWorkspaceWizardOpen}
+          initialMode={workspaceWizardInitialMode}
+          surfaceTheme={surfaceTheme}
           snapshot={snapshot}
           onRefresh={refresh}
           onWorkspaceCreated={(workspaceId) => {

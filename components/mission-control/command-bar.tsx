@@ -851,7 +851,7 @@ function buildInlineSuggestions(
 
   suggestions.push({
     id: "workspace-planner",
-    label: "Advanced setup",
+    label: "Architect mode",
     action: "open-workspace-planner"
   });
 

@@ -1,0 +1,791 @@
+"use client";
+
+import { Bot, Columns2, LoaderCircle, Sparkles, X } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+
+import { OperationProgress } from "@/components/mission-control/operation-progress";
+import { WorkspaceWizardDraftPane } from "@/components/mission-control/workspace-wizard/workspace-wizard-draft-pane";
+import { WorkspaceWizardHeader } from "@/components/mission-control/workspace-wizard/workspace-wizard-header";
+import { WizardComposer } from "@/components/mission-control/workspace-wizard/wizard-composer";
+import {
+  type WizardMessageRecord,
+  WizardMessageList
+} from "@/components/mission-control/workspace-wizard/wizard-message-list";
+import {
+  WizardSuggestionChips
+} from "@/components/mission-control/workspace-wizard/wizard-suggestion-chips";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { useWorkspaceWizardDraft, type WorkspaceWizardMode } from "@/hooks/use-workspace-wizard-draft";
+import {
+  getPlannerStageLabel
+} from "@/lib/openclaw/planner-presenters";
+import type {
+  MissionControlSnapshot,
+  WorkspacePlan,
+  WorkspaceTemplate
+} from "@/lib/openclaw/types";
+import {
+  buildWorkspaceWizardPathPreview,
+  inferWorkspaceWizardTemplate,
+  resolveWorkspaceWizardName
+} from "@/lib/openclaw/workspace-wizard-inference";
+
+type SurfaceTheme = "dark" | "light";
+
+type WorkspaceWizardDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialMode?: WorkspaceWizardMode;
+  surfaceTheme: SurfaceTheme;
+  snapshot: MissionControlSnapshot;
+  onRefresh: () => Promise<void>;
+  onWorkspaceCreated: (workspaceId: string) => void;
+};
+
+type SuggestionChip = {
+  id: string;
+  label: string;
+  prompt: string;
+};
+
+const basicSuggestions: SuggestionChip[] = [
+  {
+    id: "software",
+    label: "Ship a software workspace",
+    prompt: "Create a software workspace to ship product work, review changes, and keep durable project context."
+  },
+  {
+    id: "frontend",
+    label: "Spin up a frontend squad",
+    prompt: "Create a frontend workspace for rapid UI delivery, QA, and release-ready product handoffs."
+  },
+  {
+    id: "content",
+    label: "Run a content engine",
+    prompt: "Create a content workspace to plan campaigns, produce copy, and keep publishing operations organized."
+  },
+  {
+    id: "research",
+    label: "Start a research pod",
+    prompt: "Create a research workspace for investigation, synthesis, benchmarking, and note capture."
+  }
+];
+
+export function WorkspaceWizardDialog({
+  open,
+  onOpenChange,
+  initialMode = "basic",
+  surfaceTheme,
+  snapshot,
+  onRefresh,
+  onWorkspaceCreated
+}: WorkspaceWizardDialogProps) {
+  const wizard = useWorkspaceWizardDraft({
+    open,
+    initialMode,
+    onRefresh,
+    onWorkspaceCreated
+  });
+
+  const [basicComposerValue, setBasicComposerValue] = useState("");
+  const [advancedComposerValue, setAdvancedComposerValue] = useState("");
+  const [isMobileBlueprintOpen, setIsMobileBlueprintOpen] = useState(false);
+  const isLight = surfaceTheme === "light";
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setBasicComposerValue("");
+      setAdvancedComposerValue("");
+      setIsMobileBlueprintOpen(false);
+    }
+
+    onOpenChange(nextOpen);
+  };
+
+  const resolvedName = resolveWorkspaceWizardName(wizard.basicDraft);
+  const resolvedTemplate = inferWorkspaceWizardTemplate(
+    `${wizard.basicDraft.goal}\n${wizard.basicDraft.source}`
+  );
+  const workspacePath = buildWorkspaceWizardPathPreview(
+    snapshot.diagnostics.workspaceRoot,
+    wizard.basicDraft,
+    wizard.sourceAnalysis
+  );
+
+  const headerBadges = useMemo(() => buildHeaderBadges(wizard.mode, wizard.plan), [wizard.mode, wizard.plan]);
+
+  const basicMessages = useMemo<WizardMessageRecord[]>(() => {
+    if (!wizard.basicDraft.goal.trim()) {
+      return [];
+    }
+
+    return [
+      {
+        id: "basic-user-intent",
+        role: "user",
+        text: wizard.basicDraft.goal.trim()
+      },
+      {
+        id: "basic-architect-summary",
+        role: "assistant",
+        author: "Architect",
+        text: `I am setting up ${resolvedName} as a ${humanizeTemplate(resolvedTemplate).toLowerCase()} workspace. ${
+          wizard.sourceAnalysis.kind === "empty"
+            ? "This will start from a clean scaffold."
+            : `I will start from ${wizard.sourceAnalysis.label.toLowerCase()} and keep the fast path intact.`
+        }`
+      }
+    ];
+  }, [resolvedName, resolvedTemplate, wizard.basicDraft.goal, wizard.sourceAnalysis.kind, wizard.sourceAnalysis.label]);
+
+  const advancedMessages = useMemo<WizardMessageRecord[]>(
+    () =>
+      wizard.plan?.conversation.map((message) => ({
+        id: message.id,
+        role: message.role,
+        author:
+          message.role === "assistant"
+            ? "Architect"
+            : message.role === "system"
+              ? "Workspace Wizard"
+              : message.author,
+        text: message.text
+      })) ?? [],
+    [wizard.plan]
+  );
+
+  const activeMessages = wizard.mode === "basic" ? basicMessages : advancedMessages;
+  const activeSuggestions =
+    wizard.mode === "basic"
+      ? basicSuggestions
+      : (wizard.plan?.intake.suggestedReplies ?? [])
+          .filter((value) => value.trim().length > 0)
+          .map((value, index) => ({
+            id: `reply-${index}`,
+            label: value,
+            prompt: value
+          }))
+          .slice(0, 4);
+
+  const activeProgress = wizard.isCreating ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null;
+
+  const submitBasicIntent = async () => {
+    const nextGoal = basicComposerValue.trim();
+
+    if (!nextGoal) {
+      return;
+    }
+
+    wizard.setBasicGoal(nextGoal);
+    setBasicComposerValue("");
+  };
+
+  const submitAdvancedIntent = async () => {
+    const nextMessage = advancedComposerValue.trim();
+
+    if (!nextMessage) {
+      return;
+    }
+
+    const success = await wizard.submitArchitectTurn(nextMessage);
+
+    if (success) {
+      setAdvancedComposerValue("");
+    }
+  };
+
+  const handleCreateWorkspace = async () => {
+    if (basicComposerValue.trim() && !wizard.basicDraft.goal.trim()) {
+      wizard.setBasicGoal(basicComposerValue.trim());
+      setBasicComposerValue("");
+    }
+
+    const result = await wizard.createWorkspace();
+
+    if (result) {
+      handleOpenChange(false);
+    }
+  };
+
+  const handleDeployWorkspace = async () => {
+    const result = await wizard.deployPlan();
+
+    if (result) {
+      handleOpenChange(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className={
+          isLight
+            ? "h-[92vh] max-w-[min(1380px,96vw)] gap-0 overflow-hidden border-[#e7dfd4] bg-[#fcfaf6] p-0 text-[#161411] shadow-[0_40px_140px_rgba(16,12,8,0.45)]"
+            : "h-[92vh] max-w-[min(1380px,96vw)] gap-0 overflow-hidden border-white/10 bg-[rgba(4,8,15,0.96)] p-0 text-white shadow-[0_40px_140px_rgba(0,0,0,0.58)]"
+        }
+      >
+        <DialogTitle className="sr-only">Create workspace</DialogTitle>
+        <DialogDescription className="sr-only">
+          Create a workspace in Basic or Advanced mode using the Architect wizard.
+        </DialogDescription>
+        <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+          <div
+            className={
+              isLight
+                ? "pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.86),transparent_34%),linear-gradient(180deg,rgba(248,244,237,0.92),rgba(252,250,246,0.86)_24%,rgba(244,238,230,0.82)_100%)]"
+                : "pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.14),transparent_28%),radial-gradient(circle_at_80%_18%,rgba(56,189,248,0.12),transparent_24%),linear-gradient(180deg,rgba(9,15,27,0.98),rgba(4,8,15,0.96)_28%,rgba(2,6,13,0.98)_100%)]"
+            }
+          />
+          <WorkspaceWizardHeader
+            surfaceTheme={surfaceTheme}
+            mode={wizard.mode}
+            onModeChange={(mode) => {
+              void wizard.switchMode(mode);
+            }}
+            onNewDraft={() => {
+              setBasicComposerValue("");
+              setAdvancedComposerValue("");
+              setIsMobileBlueprintOpen(false);
+              void wizard.startFreshDraft();
+            }}
+            badges={headerBadges}
+          />
+
+          <div className="relative z-[1] grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr),390px] xl:grid-cols-[minmax(0,1fr),420px]">
+            <div
+              className={
+                isLight
+                  ? "flex min-h-0 flex-col bg-[linear-gradient(180deg,rgba(252,250,246,0.7),rgba(247,242,235,0.92))]"
+                  : "flex min-h-0 flex-col bg-[linear-gradient(180deg,rgba(8,13,24,0.2),rgba(6,10,18,0.42))]"
+              }
+            >
+              <div className="flex min-h-0 flex-1 flex-col">
+                {wizard.mode === "advanced" && wizard.architectBusyStatus ? (
+                  <div className={isLight ? "border-b border-[#ece5db] px-4 py-3 md:px-5" : "border-b border-white/10 px-4 py-3 md:px-5"}>
+                    <div className={isLight ? "rounded-[18px] border border-[#e6dfd5] bg-white px-4 py-3" : "rounded-[18px] border border-white/10 bg-white/[0.04] px-4 py-3"}>
+                      <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#8b7262]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
+                        {wizard.architectBusyStatus.title}
+                      </p>
+                      <p className={isLight ? "mt-1 text-[13px] leading-6 text-[#6d665e]" : "mt-1 text-[13px] leading-6 text-slate-300"}>
+                        {wizard.architectBusyStatus.description}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="min-h-0 flex-1">
+                  <WizardMessageList
+                    surfaceTheme={surfaceTheme}
+                    messages={activeMessages}
+                    emptyState={
+                      wizard.mode === "basic" ? (
+                        <BasicGreeting surfaceTheme={surfaceTheme} />
+                      ) : wizard.isPlanLoading ? (
+                        <LoadingGreeting surfaceTheme={surfaceTheme} />
+                      ) : (
+                        <AdvancedGreeting surfaceTheme={surfaceTheme} />
+                      )
+                    }
+                    auxiliary={
+                      wizard.mode === "basic" ? (
+                        <BasicQuickStartCard
+                          surfaceTheme={surfaceTheme}
+                          name={wizard.basicDraft.name}
+                          source={wizard.basicDraft.source}
+                          onNameChange={wizard.setBasicName}
+                          onSourceChange={wizard.setBasicSource}
+                        />
+                      ) : activeProgress ? (
+                        <div className="mx-auto w-full max-w-3xl">
+                          <OperationProgress
+                            progress={activeProgress}
+                            className={isLight ? "border-[#e6dfd5] bg-white" : "border-white/10 bg-slate-950/50"}
+                          />
+                        </div>
+                      ) : null
+                    }
+                  />
+                </div>
+              </div>
+
+              <div
+                className={
+                  isLight
+                    ? "border-t border-[#ece5db] bg-[linear-gradient(180deg,rgba(252,250,246,0.7),rgba(247,242,235,0.92))] px-4 py-4 md:px-5"
+                    : "border-t border-white/10 bg-[linear-gradient(180deg,rgba(5,9,18,0.68),rgba(4,8,15,0.94))] px-4 py-4 md:px-5"
+                }
+              >
+                <div className="mx-auto w-full max-w-4xl">
+                  <WizardSuggestionChips
+                    surfaceTheme={surfaceTheme}
+                    chips={activeSuggestions.map((chip) => ({
+                      id: chip.id,
+                      label: chip.label
+                    }))}
+                    onSelect={(chip) => {
+                      const selected = activeSuggestions.find((entry) => entry.id === chip.id);
+                      if (!selected) {
+                        return;
+                      }
+
+                      if (wizard.mode === "basic") {
+                        setBasicComposerValue(selected.prompt);
+                        return;
+                      }
+
+                      setAdvancedComposerValue(selected.prompt);
+                    }}
+                    className="mb-3"
+                  />
+
+                  <WizardComposer
+                    surfaceTheme={surfaceTheme}
+                    value={wizard.mode === "basic" ? basicComposerValue : advancedComposerValue}
+                    onChange={(value) => {
+                      if (wizard.mode === "basic") {
+                        setBasicComposerValue(value);
+                        return;
+                      }
+
+                      setAdvancedComposerValue(value);
+                    }}
+                    onSubmit={() => (wizard.mode === "basic" ? submitBasicIntent() : submitAdvancedIntent())}
+                    placeholder={
+                      wizard.mode === "basic"
+                        ? "Describe the workspace you want to create..."
+                        : "Tell Architect how the workspace should work..."
+                    }
+                    disabled={
+                      wizard.mode === "advanced"
+                        ? wizard.isSending || wizard.isPlanLoading || wizard.isDeploying
+                        : wizard.isCreating
+                    }
+                    isBusy={wizard.mode === "advanced" ? wizard.isSending : false}
+                    helperText={
+                      wizard.mode === "basic"
+                        ? "Send once to commit the goal, then create immediately or switch to Advanced."
+                        : "Architect updates the same structured draft with every turn."
+                    }
+                    toolbar={
+                      wizard.mode === "basic" ? (
+                        <span
+                          className={
+                            isLight
+                              ? "inline-flex items-center rounded-full border border-[#e3ddd4] bg-[#f6f1ea] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-[#6c645b]"
+                              : "inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-slate-300"
+                          }
+                        >
+                          Fast path
+                        </span>
+                      ) : wizard.plan ? (
+                        <span
+                          className={
+                            isLight
+                              ? "inline-flex items-center rounded-full border border-[#e3ddd4] bg-[#f6f1ea] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-[#6c645b]"
+                              : "inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-slate-300"
+                          }
+                        >
+                          Stage · {getPlannerStageLabel(wizard.plan.stage)}
+                        </span>
+                      ) : null
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <WorkspaceWizardDraftPane
+              className="hidden lg:block"
+              surfaceTheme={surfaceTheme}
+              mode={wizard.mode}
+              snapshot={snapshot}
+              plan={wizard.plan}
+              resolvedName={resolvedName}
+              resolvedTemplate={resolvedTemplate}
+              sourceAnalysis={wizard.sourceAnalysis}
+              workspacePath={workspacePath}
+              notice={wizard.notice}
+              progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
+            />
+          </div>
+
+          {isMobileBlueprintOpen ? (
+            <div
+              className={
+                isLight
+                  ? "absolute inset-0 z-20 flex flex-col bg-[rgba(22,18,14,0.18)] backdrop-blur-sm lg:hidden"
+                  : "absolute inset-0 z-20 flex flex-col bg-[rgba(2,6,13,0.56)] backdrop-blur-sm lg:hidden"
+              }
+            >
+              <div className={isLight ? "flex items-center justify-between border-b border-[#e7dfd4] bg-[#fcfaf6] px-4 py-3" : "flex items-center justify-between border-b border-white/10 bg-[rgba(4,8,15,0.96)] px-4 py-3"}>
+                <div>
+                  <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#9f958a]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
+                    {wizard.mode === "basic" ? "Workspace draft" : "Workspace blueprint"}
+                  </p>
+                  <p className={isLight ? "text-[13px] text-[#6f675e]" : "text-[13px] text-slate-300"}>
+                    Review the structured side of the same wizard.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsMobileBlueprintOpen(false)}
+                  className={
+                    isLight
+                      ? "inline-flex size-9 items-center justify-center rounded-full border border-[#e4ddd3] bg-white text-[#4f4943] transition-colors hover:bg-[#f4efe7]"
+                      : "inline-flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-slate-200 transition-colors hover:bg-white/[0.08]"
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <WorkspaceWizardDraftPane
+                className="min-h-0 flex-1 border-t-0 lg:hidden"
+                surfaceTheme={surfaceTheme}
+                mode={wizard.mode}
+                snapshot={snapshot}
+                plan={wizard.plan}
+                resolvedName={resolvedName}
+                resolvedTemplate={resolvedTemplate}
+                sourceAnalysis={wizard.sourceAnalysis}
+                workspacePath={workspacePath}
+                notice={wizard.notice}
+                progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
+              />
+            </div>
+          ) : null}
+
+          <div
+            className={
+              isLight
+                ? "relative z-[1] border-t border-[#e7dfd4] bg-white/90 px-4 py-3 backdrop-blur-sm md:px-5"
+                : "relative z-[1] border-t border-white/10 bg-[rgba(4,8,15,0.88)] px-4 py-3 backdrop-blur-sm md:px-5"
+            }
+          >
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className={isLight ? "text-[13px] text-[#776f65]" : "text-[13px] text-slate-300"}>
+                {wizard.mode === "basic"
+                  ? "Basic creates immediately with the fast-path defaults."
+                  : "Advanced keeps the conversation and blueprint aligned through review and deploy."}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className={
+                    isLight
+                      ? "rounded-full border-[#dfd8ce] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3] lg:hidden"
+                      : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08] lg:hidden"
+                  }
+                  onClick={() => setIsMobileBlueprintOpen(true)}
+                >
+                  <Columns2 className="mr-2 h-4 w-4" />
+                  View blueprint
+                </Button>
+
+                {wizard.mode === "basic" ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className={
+                        isLight
+                          ? "rounded-full border-[#dfd8ce] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                          : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      }
+                      onClick={() => {
+                        void wizard.switchMode("advanced");
+                      }}
+                      disabled={wizard.isCreating}
+                    >
+                      Open Architect mode
+                    </Button>
+                    <Button
+                      size="sm"
+                      className={
+                        isLight
+                          ? "rounded-full bg-[#161514] text-white hover:bg-[#26231f]"
+                          : "rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                      }
+                      onClick={() => void handleCreateWorkspace()}
+                      disabled={wizard.isCreating || (!wizard.basicDraft.goal.trim() && !basicComposerValue.trim())}
+                    >
+                      {wizard.isCreating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                      Create workspace now
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className={
+                        isLight
+                          ? "rounded-full border-[#dfd8ce] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                          : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      }
+                      onClick={() => void wizard.savePlan()}
+                      disabled={!wizard.plan || wizard.isSaving || wizard.isPlanLoading}
+                    >
+                      {wizard.isSaving ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className={
+                        isLight
+                          ? "rounded-full border-[#dfd8ce] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                          : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      }
+                      onClick={() => void wizard.simulatePlan()}
+                      disabled={!wizard.plan || wizard.isSimulating || wizard.isPlanLoading || wizard.isDeploying}
+                    >
+                      {wizard.isSimulating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Simulate
+                    </Button>
+                    {!wizard.plan?.intake.reviewRequested ? (
+                      <Button
+                        size="sm"
+                        className={
+                          isLight
+                            ? "rounded-full bg-[#161514] text-white hover:bg-[#26231f]"
+                            : "rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                        }
+                        onClick={() => wizard.requestReview()}
+                        disabled={!wizard.plan || wizard.isSending || wizard.isDeploying}
+                      >
+                        Request review
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className={
+                          isLight
+                            ? "rounded-full bg-[#161514] text-white hover:bg-[#26231f]"
+                            : "rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                        }
+                        onClick={() => void handleDeployWorkspace()}
+                        disabled={
+                          !wizard.plan ||
+                          wizard.plan.deploy.blockers.length > 0 ||
+                          wizard.isDeploying ||
+                          wizard.isPlanLoading
+                        }
+                      >
+                        {wizard.isDeploying ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Bot className="mr-2 h-4 w-4" />}
+                        Deploy workspace
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BasicGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div className="mx-auto mt-4 flex w-full max-w-3xl flex-col justify-center px-4 md:mt-16 md:px-8">
+      <p className={isLight ? "text-[28px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[28px] font-semibold tracking-[-0.03em] text-white"}>
+        Start a workspace in one message.
+      </p>
+      <p className={isLight ? "mt-2 text-[28px] tracking-[-0.03em] text-[#7f756b]" : "mt-2 text-[28px] tracking-[-0.03em] text-slate-400"}>
+        Architect keeps the UI chat-native, even when you stay on the fast path.
+      </p>
+    </div>
+  );
+}
+
+function AdvancedGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div className="mx-auto mt-4 flex w-full max-w-3xl flex-col justify-center px-4 md:mt-16 md:px-8">
+      <p className={isLight ? "text-[28px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[28px] font-semibold tracking-[-0.03em] text-white"}>
+        Design the workspace with Architect.
+      </p>
+      <p className={isLight ? "mt-2 text-[28px] tracking-[-0.03em] text-[#7f756b]" : "mt-2 text-[28px] tracking-[-0.03em] text-slate-400"}>
+        Describe the operating model, and the blueprint will update alongside the conversation.
+      </p>
+    </div>
+  );
+}
+
+function LoadingGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div
+      className={
+        isLight
+          ? "mx-auto mt-10 flex w-full max-w-3xl items-center gap-3 rounded-[22px] border border-[#e6dfd5] bg-white px-5 py-4 text-[14px] text-[#6d665e]"
+          : "mx-auto mt-10 flex w-full max-w-3xl items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.04] px-5 py-4 text-[14px] text-slate-300"
+      }
+    >
+      <LoaderCircle className="h-4 w-4 animate-spin" />
+      Architect is opening the planning session and loading the latest blueprint.
+    </div>
+  );
+}
+
+function BasicQuickStartCard({
+  surfaceTheme,
+  name,
+  source,
+  onNameChange,
+  onSourceChange
+}: {
+  surfaceTheme: SurfaceTheme;
+  name: string;
+  source: string;
+  onNameChange: (value: string) => void;
+  onSourceChange: (value: string) => void;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div
+      className={
+        isLight
+          ? "mx-auto w-full max-w-3xl rounded-[24px] border border-[#e4ddd3] bg-white p-4 shadow-[0_24px_80px_rgba(56,47,38,0.06)]"
+          : "mx-auto w-full max-w-3xl rounded-[24px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)]"
+      }
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={
+            isLight
+              ? "inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-[#e4ddd3] bg-[#faf6f1] text-[#5e5750]"
+              : "inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-slate-300"
+          }
+        >
+          <Sparkles className="h-4 w-4" />
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#8b7262]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
+            Quick setup
+          </p>
+          <p className={isLight ? "mt-1 text-[13px] leading-6 text-[#70685f]" : "mt-1 text-[13px] leading-6 text-slate-300"}>
+            Keep the fast path lightweight. Optional name and source live here; the main goal still comes through the composer.
+          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <FieldBlock surfaceTheme={surfaceTheme} label="Workspace name">
+              <Input
+                value={name}
+                onChange={(event) => onNameChange(event.target.value)}
+                placeholder="Optional. Architect can infer it."
+                className={
+                  isLight
+                    ? "border-[#e4ddd3] bg-[#fcfaf6] text-[#1c1916] placeholder:text-[#9b948c] focus-visible:ring-[#b8ada1]"
+                    : "border-white/10 bg-[rgba(4,8,15,0.64)] text-slate-100 placeholder:text-slate-500 focus-visible:ring-cyan-300/60"
+                }
+              />
+            </FieldBlock>
+            <FieldBlock surfaceTheme={surfaceTheme} label="Source">
+              <Input
+                value={source}
+                onChange={(event) => onSourceChange(event.target.value)}
+                placeholder="Repo URL, website URL, or existing folder path"
+                className={
+                  isLight
+                    ? "border-[#e4ddd3] bg-[#fcfaf6] text-[#1c1916] placeholder:text-[#9b948c] focus-visible:ring-[#b8ada1]"
+                    : "border-white/10 bg-[rgba(4,8,15,0.64)] text-slate-100 placeholder:text-slate-500 focus-visible:ring-cyan-300/60"
+                }
+              />
+            </FieldBlock>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldBlock({
+  surfaceTheme,
+  label,
+  children
+}: {
+  surfaceTheme: SurfaceTheme;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <p className={surfaceTheme === "light" ? "text-[11px] uppercase tracking-[0.16em] text-[#8d8276]" : "text-[11px] uppercase tracking-[0.16em] text-slate-500"}>
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null) {
+  const badges: Array<{
+    id: string;
+    label: string;
+    tone: "muted" | "success" | "warning" | "danger";
+  }> = [
+    {
+      id: "surface",
+      label: mode === "basic" ? "Fast-path surface" : "Architect co-design",
+      tone: "muted"
+    }
+  ];
+
+  if (!plan) {
+    return badges;
+  }
+
+  badges.push({
+    id: "stage",
+    label: `Stage · ${getPlannerStageLabel(plan.stage)}`,
+    tone: "muted" as const
+  });
+
+  badges.push({
+    id: "readiness",
+    label: `${plan.readinessScore}% drafted`,
+    tone: plan.readinessScore >= 85 ? "success" : plan.readinessScore >= 45 ? "warning" : "muted"
+  });
+
+  badges.push({
+    id: "status",
+    label: `Status · ${plan.status}`,
+    tone:
+      plan.status === "blocked"
+        ? "danger"
+        : plan.status === "ready" || plan.status === "deployed"
+          ? "success"
+          : plan.status === "review"
+            ? "warning"
+            : "muted"
+  });
+
+  return badges;
+}
+
+function humanizeTemplate(template: WorkspaceTemplate) {
+  return template
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
