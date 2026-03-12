@@ -28,13 +28,14 @@ const missionControlRootPath = path.join(process.cwd(), ".mission-control");
 const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
 const plannerRootPath = path.join(missionControlRootPath, "planner");
 const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspace");
+const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
+const openClawDefaultWorkspacePath = path.join(openClawStateRootPath, "workspace-dev");
 const browserStorageKeys = [
   "mission-control-surface-theme",
   "mission-control-workspace-plan-id",
   "mission-control-recent-prompts",
   "mission-control-composer-draft:*"
 ] as const;
-const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
 const liveAgentStatuses = new Set(["engaged", "monitoring", "ready"]);
 
 type ResetExecutionOptions = {
@@ -50,15 +51,20 @@ type ResetExecutionResult = {
 export async function getResetPreview(target: ResetTarget): Promise<ResetPreview> {
   const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const workspaces = buildResetPreviewWorkspaces(snapshot, target);
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
   const packageActions = target === "full-uninstall" ? await detectPackageActions(snapshot) : [];
   const summary = {
     deleteFolderCount: workspaces.filter((workspace) => workspace.action === "delete-folder").length,
     metadataOnlyCount: workspaces.filter((workspace) => workspace.action === "clean-integration").length,
     agentCount: workspaces.reduce((total, workspace) => total + workspace.agentCount, 0),
     liveAgentCount: workspaces.reduce((total, workspace) => total + workspace.liveAgentCount, 0),
-    activeRuntimeCount: snapshot.runtimes.filter(
-      (runtime) => runtime.status === "active" || runtime.status === "queued"
-    ).length
+    activeRuntimeCount: snapshot.runtimes.filter((runtime) => {
+      return (
+        typeof runtime.workspaceId === "string" &&
+        workspaceIds.has(runtime.workspaceId) &&
+        (runtime.status === "active" || runtime.status === "queued")
+      );
+    }).length
   };
   const warnings = buildResetWarnings(target, workspaces, summary, packageActions);
 
@@ -73,7 +79,7 @@ export async function getResetPreview(target: ResetTarget): Promise<ResetPreview
       target === "full-uninstall"
         ? [
             openClawStateRootPath,
-            path.join(openClawStateRootPath, "workspace-dev")
+            openClawDefaultWorkspacePath
           ]
         : [],
     packageActions,
@@ -202,13 +208,15 @@ function buildResetPreviewWorkspaces(
 
   return snapshot.workspaces
     .map((workspace) => {
+      if (target === "mission-control" && isOpenClawStateWorkspacePath(workspace.path)) {
+        return null;
+      }
+
       const agents = agentsByWorkspace.get(workspace.id) ?? [];
       const runtimes = runtimesByWorkspace.get(workspace.id) ?? [];
       const reasons: string[] = [];
       let action: ResetPreviewWorkspace["action"] = "clean-integration";
-      const isOpenClawStateWorkspace =
-        workspace.path === path.join(openClawStateRootPath, "workspace-dev") ||
-        workspace.path.startsWith(`${openClawStateRootPath}${path.sep}`);
+      const isOpenClawStateWorkspace = isOpenClawStateWorkspacePath(workspace.path);
 
       if (target === "full-uninstall" && isOpenClawStateWorkspace) {
         action = "delete-folder";
@@ -245,6 +253,7 @@ function buildResetPreviewWorkspaces(
         reasons
       };
     })
+    .filter((workspace): workspace is ResetPreviewWorkspace => Boolean(workspace))
     .sort((left, right) => {
       if (left.action !== right.action) {
         return left.action === "delete-folder" ? -1 : 1;
@@ -306,6 +315,14 @@ async function runMissionControlReset(
     });
 
     for (const workspace of deleteFolderWorkspaces) {
+      if (isOpenClawStateWorkspacePath(workspace.path)) {
+        await emit({
+          type: "log",
+          text: `Skipping direct workspace deletion for ${workspace.name}. OpenClaw uninstall will remove ${workspace.path}.`
+        });
+        continue;
+      }
+
       await emit({
         type: "log",
         text: `Deleting workspace folder: ${workspace.name} (${workspace.path})`
@@ -324,17 +341,39 @@ async function runMissionControlReset(
     });
 
     for (const workspace of metadataOnlyWorkspaces) {
+      if (isOpenClawStateWorkspacePath(workspace.path)) {
+        await emit({
+          type: "log",
+          text: `Skipping OpenClaw state workspace during Mission Control reset: ${workspace.name} (${workspace.path})`
+        });
+        continue;
+      }
+
       const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
       const agents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.workspaceId);
 
       for (const agent of agents) {
-        await emit({
-          type: "log",
-          text: `Deleting agent: ${agent.id} (${workspace.name})`
-        });
-        await deleteAgent({
-          agentId: agent.id
-        });
+        try {
+          await emit({
+            type: "log",
+            text: `Deleting agent: ${agent.id} (${workspace.name})`
+          });
+          await deleteAgent({
+            agentId: agent.id
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown agent delete error.";
+
+          if (message.includes("cannot be deleted")) {
+            await emit({
+              type: "log",
+              text: `Skipping protected agent: ${agent.id} (${workspace.name})`
+            });
+            continue;
+          }
+
+          throw error;
+        }
       }
 
       const workspaceOpenClawPath = path.join(workspace.path, ".openclaw");
@@ -556,4 +595,11 @@ function uniqueStrings(values: string[]) {
 
 function quoteShellArg(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function isOpenClawStateWorkspacePath(workspacePath: string) {
+  return (
+    workspacePath === openClawDefaultWorkspacePath ||
+    workspacePath.startsWith(`${openClawStateRootPath}${path.sep}`)
+  );
 }

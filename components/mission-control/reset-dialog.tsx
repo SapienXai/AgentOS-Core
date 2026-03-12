@@ -69,7 +69,7 @@ export function ResetDialog({
     target === "full-uninstall" ? "Full Uninstall" : "Reset Mission Control";
   const description =
     target === "full-uninstall"
-      ? "Remove Mission Control state, OpenClaw service and local state, then attempt package removal."
+      ? "Remove Mission Control state, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS packages."
       : "Remove Mission Control-managed workspaces, attached agents, planner state, and browser state.";
   const dangerButtonClassName =
     surfaceTheme === "light"
