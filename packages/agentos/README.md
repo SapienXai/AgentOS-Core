@@ -20,6 +20,7 @@ Optional flags:
 agentos start --port 3000 --host 127.0.0.1
 agentos start --port 3000 --host 127.0.0.1 --open
 agentos doctor
+agentos uninstall
 ```
 
 Optional environment variables:
@@ -31,5 +32,7 @@ AGENTOS_OPEN=1
 ```
 
 `agentos doctor` prints the effective URL, bundle status, Node.js compatibility, OpenClaw detection, and browser auto-open support.
+
+`agentos uninstall` removes a release-installer copy. If the package was installed with `pnpm` or `npm`, remove it with your package manager instead.
 
 AgentOS is designed to work with a local OpenClaw installation. If OpenClaw is missing, AgentOS still starts and guides onboarding in the UI.

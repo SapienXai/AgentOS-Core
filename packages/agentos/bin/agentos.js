@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -14,6 +15,8 @@ const bundleDir = path.join(packageRoot, "bundle");
 const bundledServerPath = path.join(bundleDir, "server.js");
 
 const packageJson = JSON.parse(await readTextFile(packageJsonPath));
+const defaultInstallRoot = path.join(os.homedir(), ".agentos");
+const defaultBinDir = path.join(os.homedir(), ".local", "bin");
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
@@ -41,6 +44,16 @@ async function main() {
 
   if (firstArg === "doctor") {
     runDoctor();
+    return;
+  }
+
+  if (firstArg === "uninstall") {
+    if (args[1] === "--help" || args[1] === "-h" || args[1] === "help") {
+      printUninstallHelp();
+      return;
+    }
+
+    await runUninstall(args.slice(1));
     return;
   }
 
@@ -233,6 +246,23 @@ function parseStartArgs(rawArgs) {
   return options;
 }
 
+function parseUninstallArgs(rawArgs) {
+  const options = {
+    yes: false
+  };
+
+  for (const arg of rawArgs) {
+    if (arg === "--yes" || arg === "-y") {
+      options.yes = true;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return options;
+}
+
 function assertPort(value) {
   if (!value || !/^\d+$/.test(value)) {
     throw new Error("Expected a numeric value after --port.");
@@ -329,6 +359,7 @@ Usage:
   agentos
   agentos start --port 3000 --host 127.0.0.1 --open
   agentos doctor
+  agentos uninstall [--yes]
   agentos --version
 
 Options:
@@ -336,6 +367,18 @@ Options:
   --host, -H   Host to bind the local server (default: 127.0.0.1)
   --open, -o   Open AgentOS in the default browser after startup
   --no-open    Disable browser auto-open even if AGENTOS_OPEN is set
+`);
+}
+
+function printUninstallHelp() {
+  console.log(`Remove an AgentOS release installation.
+
+Usage:
+  agentos uninstall
+  agentos uninstall --yes
+
+Options:
+  --yes, -y   Skip the confirmation prompt
 `);
 }
 
@@ -426,4 +469,174 @@ function formatConfiguredEnv(options) {
 async function readTextFile(filePath) {
   const { readFile } = await import("node:fs/promises");
   return readFile(filePath, "utf8");
+}
+
+async function runUninstall(rawArgs) {
+  const options = parseUninstallArgs(rawArgs);
+  const install = inspectInstallation();
+
+  if (install.kind === "package-manager") {
+    printPackageManagerUninstallGuidance();
+    return;
+  }
+
+  if (install.kind === "source") {
+    console.log("This AgentOS copy looks like a source checkout, not a release installation.");
+    console.log(`Delete the checkout manually if you want to remove it: ${findRepoRoot()}`);
+    return;
+  }
+
+  if (!options.yes) {
+    const confirmed = await confirmUninstall(install);
+
+    if (!confirmed) {
+      console.log("Uninstall cancelled.");
+      return;
+    }
+  }
+
+  const removedPaths = [];
+
+  if (await removePathIfExists(install.packagePath)) {
+    removedPaths.push(install.packagePath);
+  }
+
+  if (install.launcherPath && (await removePathIfExists(install.launcherPath))) {
+    removedPaths.push(install.launcherPath);
+  }
+
+  await removeDirectoryIfEmpty(install.installRoot);
+
+  if (removedPaths.length === 0) {
+    console.log("No removable AgentOS release files were found.");
+    return;
+  }
+
+  console.log("Removed AgentOS release installation:");
+
+  for (const removedPath of removedPaths) {
+    console.log(`- ${removedPath}`);
+  }
+
+  if (!install.launcherPath) {
+    console.log(`No managed launcher was detected on PATH. If you used a custom bin directory, remove that launcher manually.`);
+  }
+}
+
+function inspectInstallation() {
+  if (path.basename(packageRoot) === "package") {
+    return {
+      kind: "release",
+      installRoot: path.dirname(packageRoot),
+      packagePath: packageRoot,
+      launcherPath: detectManagedLauncher(packageRoot)
+    };
+  }
+
+  if (packageRoot.includes(`${path.sep}node_modules${path.sep}`) || packageRoot.includes(`${path.sep}.pnpm${path.sep}`)) {
+    return {
+      kind: "package-manager"
+    };
+  }
+
+  return {
+    kind: "source"
+  };
+}
+
+function printPackageManagerUninstallGuidance() {
+  console.log("This AgentOS install appears to come from a package manager.");
+  console.log("Remove it with one of:");
+  console.log("  pnpm remove -g @sapienx/agentos");
+  console.log("  npm uninstall -g @sapienx/agentos");
+}
+
+function findRepoRoot() {
+  return path.resolve(packageRoot, "..", "..");
+}
+
+function detectManagedLauncher(installedPackagePath) {
+  const scriptMarker = normalizeForMatch(path.join(installedPackagePath, "bin", "agentos.js"));
+  const candidates = new Set([
+    resolveCommandPath("agentos"),
+    path.join(defaultBinDir, "agentos")
+  ]);
+
+  for (const candidate of candidates) {
+    if (!candidate || !existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      const contents = readFileSync(candidate, "utf8");
+
+      if (normalizeForMatch(contents).includes(scriptMarker)) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function normalizeForMatch(value) {
+  return value.replaceAll("\\", "/");
+}
+
+async function confirmUninstall(install) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("Refusing to uninstall without --yes in a non-interactive terminal.");
+  }
+
+  console.log("AgentOS release uninstall");
+  console.log(`Package: ${install.packagePath}`);
+
+  if (install.launcherPath) {
+    console.log(`Launcher: ${install.launcherPath}`);
+  } else {
+    console.log(`Launcher: not detected on PATH`);
+  }
+
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    const answer = await readline.question("Remove these files? [y/N] ");
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    readline.close();
+  }
+}
+
+async function removePathIfExists(targetPath) {
+  const { rm } = await import("node:fs/promises");
+
+  if (!existsSync(targetPath)) {
+    return false;
+  }
+
+  await rm(targetPath, {
+    recursive: true,
+    force: true
+  });
+
+  return true;
+}
+
+async function removeDirectoryIfEmpty(targetPath) {
+  const { readdir, rmdir } = await import("node:fs/promises");
+
+  if (!existsSync(targetPath)) {
+    return;
+  }
+
+  const entries = await readdir(targetPath);
+
+  if (entries.length === 0) {
+    await rmdir(targetPath);
+  }
 }

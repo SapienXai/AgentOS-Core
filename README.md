@@ -225,6 +225,20 @@ agentos start --open
 agentos doctor
 ```
 
+Uninstall:
+
+```bash
+agentos uninstall
+```
+
+If AgentOS was installed with `pnpm` or `npm`, remove it with your package manager instead:
+
+```bash
+pnpm remove -g @sapienx/agentos
+# or
+npm uninstall -g @sapienx/agentos
+```
+
 Local development:
 
 ```bash
