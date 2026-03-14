@@ -417,9 +417,9 @@ export function CommandBar({
                 textareaRef.current?.focus();
               });
             }}
-            className="w-full rounded-full border border-white/[0.08] bg-[rgba(9,14,22,0.58)] p-2 text-left shadow-[0_24px_72px_rgba(0,0,0,0.22)] backdrop-blur-[28px]"
+            className="w-full overflow-hidden rounded-full border border-white/[0.08] bg-[linear-gradient(180deg,rgba(10,16,26,0.96),rgba(6,10,18,0.94))] p-2 text-left shadow-[0_24px_72px_rgba(0,0,0,0.22)] isolate"
           >
-            <div className="flex items-center gap-2 rounded-full border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))] px-3 py-2">
+            <div className="flex items-center gap-2 rounded-full border border-white/[0.07] bg-[linear-gradient(180deg,rgba(20,28,43,0.9),rgba(11,17,28,0.88))] px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <span className="inline-flex h-7 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] text-slate-300">
                 {selectedAgent?.name || "No agent"}
               </span>
@@ -438,7 +438,7 @@ export function CommandBar({
             initial={{ opacity: 0, y: 8, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.985 }}
-            className="rounded-[26px] border border-white/[0.08] bg-[rgba(9,14,22,0.58)] p-2.5 shadow-[0_24px_72px_rgba(0,0,0,0.26)] backdrop-blur-[28px]"
+            className="overflow-hidden rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(10,16,26,0.96),rgba(6,10,18,0.94))] p-2.5 shadow-[0_24px_72px_rgba(0,0,0,0.26)] isolate"
           >
             <AnimatePresence initial={false}>
               {composeSuggestion ? (
@@ -481,8 +481,9 @@ export function CommandBar({
 
             <div
               className={cn(
-                "rounded-[22px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] transition-all duration-200",
-                isComposerActive && "border-white/[0.14] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04))]"
+                "rounded-[22px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(20,28,43,0.92),rgba(10,16,26,0.9))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200",
+                isComposerActive &&
+                  "border-white/[0.14] bg-[linear-gradient(180deg,rgba(24,34,50,0.94),rgba(12,18,30,0.92))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
               )}
               onFocusCapture={() => setIsComposerActive(true)}
               onBlurCapture={(event) => {
@@ -580,7 +581,7 @@ export function CommandBar({
                     }
                   }}
                   placeholder={dynamicPlaceholder}
-                  className="min-h-[50px] max-h-[150px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-0.5 text-[15px] leading-[1.6] text-white placeholder:text-[#f6eee5]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="min-h-[50px] max-h-[150px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-0.5 text-[15px] leading-[1.6] text-white placeholder:text-[#f6eee5]/60 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
               </div>
 
@@ -658,7 +659,7 @@ export function CommandBar({
                   exit={{ opacity: 0, y: -6 }}
                   className="mt-2 flex justify-end"
                 >
-                  <div className="w-full max-w-[232px] rounded-[20px] border border-white/[0.08] bg-[rgba(12,17,27,0.9)] p-3 shadow-[0_16px_32px_rgba(0,0,0,0.22)]">
+                  <div className="w-full max-w-[232px] rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(14,20,31,0.96),rgba(10,15,24,0.94))] p-3 shadow-[0_16px_32px_rgba(0,0,0,0.22)]">
                     <p className="text-[11px] text-slate-300">Thinking</p>
                     <div className="mt-2">
                       <InlineSelectChip
