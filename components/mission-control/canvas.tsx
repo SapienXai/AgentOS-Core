@@ -26,6 +26,7 @@ import type {
 import { AgentNode } from "@/components/mission-control/nodes/agent-node";
 import { RuntimeNode } from "@/components/mission-control/nodes/runtime-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
+import { matchesMissionRuntime } from "@/lib/openclaw/runtime-matching";
 import type { MissionControlSnapshot, RuntimeRecord } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -155,9 +156,10 @@ export function MissionCanvas({
       .filter(
         (runtime) =>
           !hiddenRuntimeIds.includes(runtime.id) &&
-          !runtime.id.startsWith("runtime:dispatch:") &&
-          runtime.agentId === candidatePendingMission.agentId &&
-          (runtime.updatedAt ?? 0) >= candidatePendingMission.submittedAt - 1500
+          matchesMissionRuntime(runtime, candidatePendingMission.mission, {
+            agentId: candidatePendingMission.agentId,
+            submittedAt: candidatePendingMission.submittedAt
+          })
       )
       .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))[0];
 

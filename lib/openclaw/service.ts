@@ -39,6 +39,7 @@ import {
   buildWorkspaceCreateProgressTemplate,
   createOperationProgressTracker
 } from "@/lib/openclaw/operation-progress";
+import { matchesMissionText } from "@/lib/openclaw/runtime-matching";
 import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
@@ -1250,12 +1251,15 @@ function shouldPruneMissionDispatchRecord(record: MissionDispatchRecord, nowMs: 
 
 function matchMissionDispatchToRuntime(record: MissionDispatchRecord, runtimes: RuntimeRecord[]) {
   const submittedAt = Date.parse(record.submittedAt);
+  const sessionId = extractMissionDispatchSessionId(record);
 
   return runtimes
     .filter(
       (runtime) =>
         !isSyntheticDispatchRuntime(runtime) &&
+        runtime.source !== "turn" &&
         runtime.agentId === record.agentId &&
+        (!sessionId || runtime.sessionId === sessionId) &&
         (runtime.updatedAt ?? 0) >= (Number.isNaN(submittedAt) ? 0 : submittedAt - 1500)
     )
     .sort(sortRuntimesByUpdatedAtDesc)[0];
@@ -1269,6 +1273,9 @@ function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: numb
   const updatedAt = Date.parse(record.updatedAt);
   const runtimeStatus = resolveMissionDispatchRuntimeStatus(record, nowMs);
   const subtitle = resolveMissionDispatchSubtitle(record, runtimeStatus);
+  const sessionId = extractMissionDispatchSessionId(record);
+  const modelId = extractMissionDispatchModelId(record);
+  const tokenUsage = extractMissionDispatchTokenUsage(record);
 
   return {
     id: `runtime:dispatch:${record.id}`,
@@ -1281,13 +1288,19 @@ function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: numb
     ageMs: Number.isNaN(updatedAt) ? null : Math.max(nowMs - updatedAt, 0),
     agentId: record.agentId,
     workspaceId: record.workspaceId ?? undefined,
+    modelId: modelId ?? undefined,
+    sessionId: sessionId ?? undefined,
     runId: record.result?.runId,
+    tokenUsage,
     metadata: {
       dispatchId: record.id,
+      mission: record.mission,
+      routedMission: record.routedMission,
       outputDir: record.outputDir,
       outputDirRelative: record.outputDirRelative,
       notesDirRelative: record.notesDirRelative,
       error: record.error,
+      sessionId,
       pendingCreation: runtimeStatus === "queued"
     }
   };
@@ -1319,8 +1332,8 @@ function resolveMissionDispatchSubtitle(
 ) {
   if (status === "completed") {
     const completedSummary =
-      record.result?.summary ||
-      record.result?.result?.payloads?.[0]?.text ||
+      resolveMissionDispatchSummary(record) ||
+      resolveMissionDispatchResultText(record) ||
       (record.outputDirRelative ? `Completed · ${record.outputDirRelative}` : "Completed in OpenClaw");
     return summarizeText(completedSummary, 90);
   }
@@ -1338,6 +1351,73 @@ function resolveMissionDispatchSubtitle(
   return record.outputDirRelative
     ? `Queued for OpenClaw · ${record.outputDirRelative}`
     : "Queued for OpenClaw";
+}
+
+function extractMissionDispatchAgentMeta(record: MissionDispatchRecord) {
+  const meta = record.result?.result?.meta;
+
+  if (!meta || typeof meta !== "object") {
+    return null;
+  }
+
+  const agentMeta = (meta as Record<string, unknown>).agentMeta;
+  return agentMeta && typeof agentMeta === "object" ? (agentMeta as Record<string, unknown>) : null;
+}
+
+function extractMissionDispatchString(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function extractMissionDispatchNumber(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function extractMissionDispatchSessionId(record: MissionDispatchRecord) {
+  return extractMissionDispatchString(extractMissionDispatchAgentMeta(record), "sessionId");
+}
+
+function extractMissionDispatchModelId(record: MissionDispatchRecord) {
+  return extractMissionDispatchString(extractMissionDispatchAgentMeta(record), "model");
+}
+
+function extractMissionDispatchTokenUsage(record: MissionDispatchRecord): RuntimeRecord["tokenUsage"] | undefined {
+  const agentMeta = extractMissionDispatchAgentMeta(record);
+  const usage = agentMeta?.usage;
+
+  if (!usage || typeof usage !== "object") {
+    return undefined;
+  }
+
+  const usageRecord = usage as Record<string, unknown>;
+  const total = extractMissionDispatchNumber(usageRecord, "total") ?? extractMissionDispatchNumber(usageRecord, "totalTokens");
+
+  if (total === null) {
+    return undefined;
+  }
+
+  return {
+    input: extractMissionDispatchNumber(usageRecord, "input") ?? 0,
+    output: extractMissionDispatchNumber(usageRecord, "output") ?? 0,
+    total,
+    cacheRead: extractMissionDispatchNumber(usageRecord, "cacheRead") ?? 0
+  };
+}
+
+function resolveMissionDispatchSummary(record: MissionDispatchRecord) {
+  const summary = record.result?.summary?.trim();
+
+  if (!summary) {
+    return null;
+  }
+
+  const normalized = summary.toLowerCase();
+  return normalized === "completed" || normalized === "ok" || normalized === "success" ? null : summary;
+}
+
+function resolveMissionDispatchResultText(record: MissionDispatchRecord) {
+  return record.result?.result?.payloads?.find((payload) => payload.text.trim().length > 0)?.text.trim() ?? null;
 }
 
 function normalizeMissionDispatchStatus(value: unknown): MissionDispatchStatus {
@@ -3926,7 +4006,7 @@ function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?:
 
   if (runtime.source === "turn") {
     const turnId = typeof runtime.metadata.turnId === "string" ? runtime.metadata.turnId : null;
-    const turn = turnId ? turns.find((entry) => entry.id === turnId) : null;
+    const turn = turnId ? turns.find((entry) => entry.id === turnId) : resolveRuntimeMissionTurn(runtime, turns);
 
     if (turn) {
       return runtimeOutputFromTurn(runtime, turn);
@@ -3953,6 +4033,31 @@ function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?:
     warnings: [],
     warningSummary: null
   };
+}
+
+function resolveRuntimeMissionTurn(runtime: RuntimeRecord, turns: TranscriptTurn[]) {
+  const mission = typeof runtime.metadata.mission === "string" ? runtime.metadata.mission : null;
+
+  if (!mission) {
+    return null;
+  }
+
+  const matchingTurns = turns.filter((turn) => matchesMissionText(turn.prompt, mission));
+
+  if (matchingTurns.length === 0) {
+    return null;
+  }
+
+  const runtimeUpdatedAt = runtime.updatedAt ?? 0;
+
+  return matchingTurns.sort((left, right) => {
+    const leftUpdatedAt = Date.parse(left.updatedAt);
+    const rightUpdatedAt = Date.parse(right.updatedAt);
+    const leftDelta = Math.abs((Number.isNaN(leftUpdatedAt) ? 0 : leftUpdatedAt) - runtimeUpdatedAt);
+    const rightDelta = Math.abs((Number.isNaN(rightUpdatedAt) ? 0 : rightUpdatedAt) - runtimeUpdatedAt);
+
+    return leftDelta - rightDelta;
+  })[0];
 }
 
 function runtimeOutputFromTurn(runtime: RuntimeRecord, turn: TranscriptTurn): RuntimeOutputRecord {

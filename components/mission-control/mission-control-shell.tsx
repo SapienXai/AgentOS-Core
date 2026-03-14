@@ -37,6 +37,7 @@ import {
   isOpenClawMissionReady as resolveOpenClawMissionReady,
   isOpenClawSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
+import { matchesMissionRuntime } from "@/lib/openclaw/runtime-matching";
 import type {
   DiscoveredModelCandidate,
   MissionResponse,
@@ -207,8 +208,10 @@ export function MissionControlShell({
 
     const syncedRuntime = snapshot.runtimes.some(
       (runtime) =>
-        runtime.agentId === pendingMission.agentId &&
-        (runtime.updatedAt ?? 0) >= pendingMission.submittedAt - 1500
+        matchesMissionRuntime(runtime, pendingMission.mission, {
+          agentId: pendingMission.agentId,
+          submittedAt: pendingMission.submittedAt
+        })
     );
 
     if (syncedRuntime) {
