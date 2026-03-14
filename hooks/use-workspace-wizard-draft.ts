@@ -16,6 +16,7 @@ import {
 import type {
   OperationProgressSnapshot,
   WorkspaceCreateResult,
+  WorkspaceCreateRules,
   WorkspaceCreateStreamEvent,
   WorkspacePlan,
   WorkspacePlanDeployResult,
@@ -25,7 +26,11 @@ import {
   applyBasicInputToWorkspacePlan,
   appendBasicModeImportNote,
   buildWorkspaceCreateInputFromPlan,
-  hasAdvancedWorkspaceDetails
+  createWorkspaceWizardQuickCreateRules,
+  extractBasicRulesFromWorkspacePlan,
+  hasAdvancedWorkspaceDetails,
+  inferWorkspaceWizardQuickSetupPreset,
+  type WorkspaceWizardQuickSetupPreset
 } from "@/lib/openclaw/workspace-wizard-mappers";
 import {
   analyzeWorkspaceWizardSourceInput,
@@ -61,6 +66,7 @@ export function useWorkspaceWizardDraft({
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [basicDraft, setBasicDraft] = useState<WorkspaceWizardBasicDraft>(createInitialWorkspaceWizardBasicDraft);
+  const [basicRules, setBasicRules] = useState<WorkspaceCreateRules>(createWorkspaceWizardQuickCreateRules);
   const [notice, setNotice] = useState<WorkspaceWizardNotice | null>(null);
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -77,6 +83,10 @@ export function useWorkspaceWizardDraft({
   const sourceAnalysis = useMemo(
     () => analyzeWorkspaceWizardSourceInput(basicDraft.source),
     [basicDraft.source]
+  );
+  const basicPreset = useMemo<WorkspaceWizardQuickSetupPreset>(
+    () => inferWorkspaceWizardQuickSetupPreset(basicRules),
+    [basicRules]
   );
 
   const architectBusyStatus = useMemo(
@@ -129,6 +139,7 @@ export function useWorkspaceWizardDraft({
 
       setPlanId(nextPlan.id);
       setBasicDraft(extractBasicDraftFromWorkspacePlan(nextPlan));
+      setBasicRules(extractBasicRulesFromWorkspacePlan(nextPlan));
       globalThis.localStorage?.setItem(plannerStorageKey, nextPlan.id);
 
       return nextPlan;
@@ -189,7 +200,7 @@ export function useWorkspaceWizardDraft({
           const draftToApply = draftOverride ?? basicDraft;
           const seededPlan =
             draftToApply.goal.trim() || draftToApply.source.trim() || draftToApply.name.trim()
-              ? applyBasicInputToWorkspacePlan(fetchedPlan, draftToApply)
+              ? applyBasicInputToWorkspacePlan(fetchedPlan, draftToApply, basicRules)
               : fetchedPlan;
 
           return commitPlan(seededPlan);
@@ -207,7 +218,7 @@ export function useWorkspaceWizardDraft({
       planRequestRef.current = request;
       return request;
     },
-    [basicDraft, commitPlan, plan, requestPlanner]
+    [basicDraft, basicRules, commitPlan, plan, requestPlanner]
   );
 
   const startFreshDraft = useCallback(async () => {
@@ -227,6 +238,7 @@ export function useWorkspaceWizardDraft({
       setPlan(null);
       setPlanId(null);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
+      setBasicRules(createWorkspaceWizardQuickCreateRules());
       return;
     }
 
@@ -235,6 +247,7 @@ export function useWorkspaceWizardDraft({
     setPlanId(null);
     const blankDraft = createInitialWorkspaceWizardBasicDraft();
     setBasicDraft(blankDraft);
+    setBasicRules(createWorkspaceWizardQuickCreateRules());
     const nextPlan = await ensurePlan({ resumeStored: false, draftOverride: blankDraft });
 
     if (nextPlan) {
@@ -338,7 +351,7 @@ export function useWorkspaceWizardDraft({
       return null;
     }
 
-    const ensuredPlan = applyBasicInputToWorkspacePlan(basePlan, basicDraft);
+    const ensuredPlan = applyBasicInputToWorkspacePlan(basePlan, basicDraft, basicRules);
 
     commitPlan(ensuredPlan);
     setIsCreating(true);
@@ -347,7 +360,7 @@ export function useWorkspaceWizardDraft({
       buildWorkspaceCreateProgressTemplate({
         sourceMode: ensuredPlan.workspace.sourceMode,
         agentCount: 1,
-        kickoffMission: true
+        kickoffMission: ensuredPlan.workspace.rules.kickoffMission ?? true
       })
     );
 
@@ -418,7 +431,7 @@ export function useWorkspaceWizardDraft({
     } finally {
       setIsCreating(false);
     }
-  }, [basicDraft, clearStoredPlan, commitPlan, ensurePlan, onRefresh, onWorkspaceCreated, plan]);
+  }, [basicDraft, basicRules, clearStoredPlan, commitPlan, ensurePlan, onRefresh, onWorkspaceCreated, plan]);
 
   const deployPlan = useCallback(async () => {
     const activePlan = plan;
@@ -578,7 +591,7 @@ export function useWorkspaceWizardDraft({
           return;
         }
 
-        const seededPlan = applyBasicInputToWorkspacePlan(ensuredPlan, basicDraft);
+        const seededPlan = applyBasicInputToWorkspacePlan(ensuredPlan, basicDraft, basicRules);
         const shouldAppendImportNote =
           !seededPlan.intake.started &&
           seededPlan.conversation.filter((message) => message.role !== "system").length <= 1;
@@ -603,6 +616,7 @@ export function useWorkspaceWizardDraft({
 
       if (plan) {
         setBasicDraft(extractBasicDraftFromWorkspacePlan(plan));
+        setBasicRules(extractBasicRulesFromWorkspacePlan(plan));
         setNotice(
           hasAdvancedWorkspaceDetails(plan)
             ? {
@@ -618,7 +632,7 @@ export function useWorkspaceWizardDraft({
 
       setMode("basic");
     },
-    [basicDraft, commitPlan, ensurePlan, mode, plan]
+    [basicDraft, basicRules, commitPlan, ensurePlan, mode, plan]
   );
 
   const setBasicGoal = useCallback((goal: string) => {
@@ -629,12 +643,14 @@ export function useWorkspaceWizardDraft({
       };
 
       if (mode === "basic") {
-        setPlan((activePlan) => (activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft) : activePlan));
+        setPlan((activePlan) =>
+          activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan
+        );
       }
 
       return nextDraft;
     });
-  }, [mode]);
+  }, [basicRules, mode]);
 
   const setBasicSource = useCallback((source: string) => {
     setBasicDraft((current) => {
@@ -644,12 +660,14 @@ export function useWorkspaceWizardDraft({
       };
 
       if (mode === "basic") {
-        setPlan((activePlan) => (activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft) : activePlan));
+        setPlan((activePlan) =>
+          activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan
+        );
       }
 
       return nextDraft;
     });
-  }, [mode]);
+  }, [basicRules, mode]);
 
   const setBasicName = useCallback((name: string) => {
     setBasicDraft((current) => {
@@ -659,12 +677,44 @@ export function useWorkspaceWizardDraft({
       };
 
       if (mode === "basic") {
-        setPlan((activePlan) => (activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft) : activePlan));
+        setPlan((activePlan) =>
+          activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan
+        );
       }
 
       return nextDraft;
     });
-  }, [mode]);
+  }, [basicRules, mode]);
+
+  const setBasicPreset = useCallback(
+    (preset: WorkspaceWizardQuickSetupPreset) => {
+      const nextRules = createWorkspaceWizardQuickCreateRules(preset);
+      setBasicRules(nextRules);
+      setPlan((activePlan) =>
+        activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan
+      );
+    },
+    [basicDraft]
+  );
+
+  const toggleBasicRule = useCallback(
+    (rule: keyof Pick<WorkspaceCreateRules, "generateStarterDocs" | "generateMemory" | "kickoffMission">) => {
+      setBasicRules((current) => {
+        const nextRules = {
+          ...current,
+          [rule]: !current[rule],
+          workspaceOnly: true
+        };
+
+        setPlan((activePlan) =>
+          activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan
+        );
+
+        return nextRules;
+      });
+    },
+    [basicDraft]
+  );
 
   useEffect(() => {
     if (!open) {
@@ -672,6 +722,7 @@ export function useWorkspaceWizardDraft({
       setPlan(null);
       setPlanId(null);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
+      setBasicRules(createWorkspaceWizardQuickCreateRules());
       setNotice(null);
       setCreateProgress(null);
       setDeployProgress(null);
@@ -682,6 +733,7 @@ export function useWorkspaceWizardDraft({
 
     setMode(initialMode);
     setBasicDraft(createInitialWorkspaceWizardBasicDraft());
+    setBasicRules(createWorkspaceWizardQuickCreateRules());
     setNotice(null);
     setCreateProgress(null);
     setDeployProgress(null);
@@ -721,6 +773,8 @@ export function useWorkspaceWizardDraft({
     notice,
     sourceAnalysis,
     basicDraft,
+    basicRules,
+    basicPreset,
     isPlanLoading,
     isSending,
     isSaving,
@@ -734,6 +788,8 @@ export function useWorkspaceWizardDraft({
     setBasicGoal,
     setBasicSource,
     setBasicName,
+    setBasicPreset,
+    toggleBasicRule,
     setNotice,
     updatePlan,
     switchMode,

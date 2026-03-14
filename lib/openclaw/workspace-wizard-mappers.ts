@@ -3,7 +3,7 @@ import {
   createPlannerMessage,
   enrichWorkspacePlan
 } from "@/lib/openclaw/planner-core";
-import type { WorkspacePlan, WorkspaceCreateInput } from "@/lib/openclaw/types";
+import type { WorkspaceCreateInput, WorkspaceCreateRules, WorkspacePlan } from "@/lib/openclaw/types";
 import { DEFAULT_WORKSPACE_RULES } from "@/lib/openclaw/workspace-presets";
 import {
   analyzeWorkspaceWizardSourceInput,
@@ -15,17 +15,50 @@ import {
 const basicSourceId = "workspace-wizard-basic-source";
 const basicImportPrefix = "Imported quick setup assumptions:";
 
-export const quickCreateRules = {
-  ...DEFAULT_WORKSPACE_RULES,
-  workspaceOnly: true,
-  generateStarterDocs: true,
-  generateMemory: true,
-  kickoffMission: true
-} satisfies NonNullable<WorkspaceCreateInput["rules"]>;
+export type WorkspaceWizardQuickSetupPreset = "standard" | "fastest" | "custom";
+
+export function createWorkspaceWizardQuickCreateRules(
+  preset: WorkspaceWizardQuickSetupPreset = "standard"
+): WorkspaceCreateRules {
+  return {
+    ...DEFAULT_WORKSPACE_RULES,
+    workspaceOnly: true,
+    generateStarterDocs: preset !== "fastest",
+    generateMemory: preset !== "fastest",
+    kickoffMission: preset !== "fastest"
+  };
+}
+
+export function normalizeWorkspaceWizardQuickCreateRules(
+  rules?: Partial<WorkspaceCreateRules>
+): WorkspaceCreateRules {
+  return {
+    ...createWorkspaceWizardQuickCreateRules(),
+    ...rules,
+    workspaceOnly: true
+  };
+}
+
+export function inferWorkspaceWizardQuickSetupPreset(
+  rules?: Partial<WorkspaceCreateRules>
+): WorkspaceWizardQuickSetupPreset {
+  const normalized = normalizeWorkspaceWizardQuickCreateRules(rules);
+
+  if (!normalized.generateStarterDocs && !normalized.generateMemory && !normalized.kickoffMission) {
+    return "fastest";
+  }
+
+  if (normalized.generateStarterDocs && normalized.generateMemory && normalized.kickoffMission) {
+    return "standard";
+  }
+
+  return "custom";
+}
 
 export function applyBasicInputToWorkspacePlan(
   plan: WorkspacePlan,
-  draft: WorkspaceWizardBasicDraft
+  draft: WorkspaceWizardBasicDraft,
+  rulesOverride?: Partial<WorkspaceCreateRules>
 ) {
   const next = structuredClone(plan);
   const sourceAnalysis = analyzeWorkspaceWizardSourceInput(draft.source);
@@ -54,6 +87,7 @@ export function applyBasicInputToWorkspacePlan(
   next.workspace.existingPath = sourceAnalysis.existingPath;
   next.workspace.template = inferWorkspaceWizardTemplate(`${goal}\n${draft.source}`);
   next.workspace.modelProfile = next.workspace.modelProfile || "balanced";
+  next.workspace.rules = normalizeWorkspaceWizardQuickCreateRules(rulesOverride ?? next.workspace.rules);
 
   next.intake.sources = next.intake.sources.filter((source) => source.id !== basicSourceId);
 
@@ -122,8 +156,12 @@ export function buildWorkspaceCreateInputFromPlan(plan: WorkspacePlan): Workspac
     template: plan.workspace.template,
     teamPreset: "solo",
     modelProfile: plan.workspace.modelProfile || "balanced",
-    rules: quickCreateRules
+    rules: normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules)
   };
+}
+
+export function extractBasicRulesFromWorkspacePlan(plan: WorkspacePlan): WorkspaceCreateRules {
+  return normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules);
 }
 
 export function buildWorkspaceCreateBriefFromPlan(plan: WorkspacePlan) {

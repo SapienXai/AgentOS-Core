@@ -2129,7 +2129,7 @@ function buildTargetCustomerPrompt(plan: WorkspacePlan) {
   return language === "tr" ? "İlk kullanıcı ya da müşteri segmenti kim?" : "Who is the first user or customer segment?";
 }
 
-function resolvePlannerReplyLanguage(plan: WorkspacePlan, lastUserMessage?: string): "en" | "tr" {
+export function resolvePlannerReplyLanguage(plan: WorkspacePlan, lastUserMessage?: string): "en" | "tr" {
   const candidates = [
     lastUserMessage,
     ...plan.conversation
@@ -2142,12 +2142,25 @@ function resolvePlannerReplyLanguage(plan: WorkspacePlan, lastUserMessage?: stri
   ];
 
   for (const candidate of candidates) {
-    if (isProbablyTurkishText(candidate)) {
-      return "tr";
+    const detectedLanguage = detectPlannerTextLanguage(candidate);
+    if (detectedLanguage) {
+      return detectedLanguage;
     }
   }
 
   return "en";
+}
+
+export function detectPlannerTextLanguage(value?: string): "en" | "tr" | null {
+  if (isProbablyTurkishText(value)) {
+    return "tr";
+  }
+
+  if (isProbablyEnglishText(value)) {
+    return "en";
+  }
+
+  return null;
 }
 
 function isProbablyTurkishText(value?: string) {
@@ -2164,6 +2177,20 @@ function isProbablyTurkishText(value?: string) {
   const matches = trimmed
     .toLowerCase()
     .match(/\b(ve|bir|bu|şu|için|ile|olarak|olan|mı|mi|mu|mü|ne|nasıl|hangi|neden|hedef|ilk|müşteri|kullanıcı|oluştur|gerekli|alanları|yardımcı)\b/g);
+
+  return Boolean(matches && matches.length >= 2);
+}
+
+function isProbablyEnglishText(value?: string) {
+  const trimmed = value?.trim();
+
+  if (!trimmed || /[çğıöşüÇĞİÖŞÜ]/.test(trimmed)) {
+    return false;
+  }
+
+  const matches = trimmed
+    .toLowerCase()
+    .match(/\b(let'?s|the|and|for|with|from|this|that|what|how|why|when|where|who|should|could|would|need|want|start|build|create|launch|project|workspace|customer|user|team|goal|mission|review|deploy|product|website|repo|folder)\b/g);
 
   return Boolean(matches && matches.length >= 2);
 }

@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Bot, FolderOpen, GitBranch, Globe, Rocket, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  Bot,
+  Check,
+  FileText,
+  FolderOpen,
+  GitBranch,
+  Globe,
+  LockKeyhole,
+  Rocket,
+  Sparkles,
+  Zap
+} from "lucide-react";
 
 import { OperationProgress } from "@/components/mission-control/operation-progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,8 +25,15 @@ import {
   summarizePlannerSection,
   type PlannerSectionId
 } from "@/lib/openclaw/planner-presenters";
-import type { MissionControlSnapshot, OperationProgressSnapshot, WorkspacePlan, WorkspaceTemplate } from "@/lib/openclaw/types";
-import { WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
+import type {
+  MissionControlSnapshot,
+  OperationProgressSnapshot,
+  WorkspaceCreateRules,
+  WorkspacePlan,
+  WorkspaceTemplate
+} from "@/lib/openclaw/types";
+import { buildWorkspaceScaffoldPreview, WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
+import type { WorkspaceWizardQuickSetupPreset } from "@/lib/openclaw/workspace-wizard-mappers";
 import type { WorkspaceWizardSourceAnalysis } from "@/lib/openclaw/workspace-wizard-inference";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +52,7 @@ type WorkspaceWizardNotice = {
 type DraftSectionKey =
   | "notice"
   | "progress"
+  | "setup-speed"
   | "architect-readout"
   | "name"
   | "source"
@@ -54,6 +74,12 @@ type WorkspaceWizardDraftPaneProps = {
   sourceAnalysis: WorkspaceWizardSourceAnalysis;
   workspacePath: string;
   notice: WorkspaceWizardNotice | null;
+  basicRules: WorkspaceCreateRules;
+  basicPreset: WorkspaceWizardQuickSetupPreset;
+  onBasicPresetChange: (preset: WorkspaceWizardQuickSetupPreset) => void;
+  onBasicRuleToggle: (
+    rule: keyof Pick<WorkspaceCreateRules, "generateStarterDocs" | "generateMemory" | "kickoffMission">
+  ) => void;
   progress: OperationProgressSnapshot | null;
 };
 
@@ -68,6 +94,10 @@ export function WorkspaceWizardDraftPane({
   sourceAnalysis,
   workspacePath,
   notice,
+  basicRules,
+  basicPreset,
+  onBasicPresetChange,
+  onBasicRuleToggle,
   progress
 }: WorkspaceWizardDraftPaneProps) {
   const isLight = surfaceTheme === "light";
@@ -83,10 +113,12 @@ export function WorkspaceWizardDraftPane({
         progress,
         resolvedName,
         resolvedTemplate,
+        basicRules,
+        basicPreset,
         sourceAnalysis,
         workspacePath
       }),
-    [mode, notice, plan, progress, resolvedName, resolvedTemplate, sourceAnalysis, workspacePath]
+    [basicPreset, basicRules, mode, notice, plan, progress, resolvedName, resolvedTemplate, sourceAnalysis, workspacePath]
   );
 
   useEffect(() => {
@@ -150,6 +182,22 @@ export function WorkspaceWizardDraftPane({
                 : "Live structured view of what Architect is shaping through conversation."
             }
           />
+
+          <TrackedSection
+            sectionKey="setup-speed"
+            activeSection={activeSection}
+            surfaceTheme={surfaceTheme}
+            register={(node) => {
+              sectionRefs.current["setup-speed"] = node;
+            }}
+          >
+            <SetupSpeedCard
+              surfaceTheme={surfaceTheme}
+              mode={mode}
+              preset={basicPreset}
+              onPresetChange={onBasicPresetChange}
+            />
+          </TrackedSection>
 
           {notice ? (
             <TrackedSection
@@ -318,14 +366,13 @@ export function WorkspaceWizardDraftPane({
                   <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>
                     Fast-path defaults
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Pill surfaceTheme={surfaceTheme} label="Solo team" />
-                    <Pill surfaceTheme={surfaceTheme} label="Balanced model" />
-                    <Pill surfaceTheme={surfaceTheme} label="Kickoff mission" />
-                  </div>
-                  <p className={cn("mt-3 text-[13px] leading-6", isLight ? "text-[#70685f]" : "text-slate-300")}>
-                    Need more control? Switch to Advanced and keep the same draft while Architect expands team, workflows, and deploy readiness.
-                  </p>
+                  <BasicSetupCard
+                    surfaceTheme={surfaceTheme}
+                    template={resolvedTemplate}
+                    rules={basicRules}
+                    preset={basicPreset}
+                    onRuleToggle={onBasicRuleToggle}
+                  />
                 </div>
               </TrackedSection>
             </div>
@@ -458,13 +505,14 @@ type TrackedDraftSnapshot = {
   mode: WorkspaceWizardMode;
   noticeSignature: string;
   progressSignature: string;
-  basic: {
-    architectSignature: string;
-    nameSignature: string;
-    sourceSignature: string;
-    templateSignature: string;
-    pathSignature: string;
-  };
+    basic: {
+      architectSignature: string;
+      nameSignature: string;
+      sourceSignature: string;
+      templateSignature: string;
+      pathSignature: string;
+      defaultsSignature: string;
+    };
   advanced: {
     stage: WorkspacePlan["stage"] | null;
     readinessSignature: string;
@@ -480,11 +528,22 @@ function buildTrackedDraftSnapshot({
   progress,
   resolvedName,
   resolvedTemplate,
+  basicRules,
+  basicPreset,
   sourceAnalysis,
   workspacePath
 }: Pick<
   WorkspaceWizardDraftPaneProps,
-  "mode" | "plan" | "notice" | "progress" | "resolvedName" | "resolvedTemplate" | "sourceAnalysis" | "workspacePath"
+  | "mode"
+  | "plan"
+  | "notice"
+  | "progress"
+  | "resolvedName"
+  | "resolvedTemplate"
+  | "basicRules"
+  | "basicPreset"
+  | "sourceAnalysis"
+  | "workspacePath"
 >): TrackedDraftSnapshot {
   return {
     mode,
@@ -495,7 +554,8 @@ function buildTrackedDraftSnapshot({
       nameSignature: resolvedName,
       sourceSignature: `${sourceAnalysis.kind}:${sourceAnalysis.label}:${sourceAnalysis.hint}:${sourceAnalysis.repoUrl ?? ""}:${sourceAnalysis.existingPath ?? ""}:${sourceAnalysis.websiteUrl ?? ""}`,
       templateSignature: resolvedTemplate,
-      pathSignature: workspacePath
+      pathSignature: workspacePath,
+      defaultsSignature: `${basicPreset}:${basicRules.generateStarterDocs}:${basicRules.generateMemory}:${basicRules.kickoffMission}`
     },
     advanced: {
       stage: plan?.stage ?? null,
@@ -559,6 +619,10 @@ function resolveTrackedDraftSection(
 
     if (previousSnapshot.basic.pathSignature !== nextSnapshot.basic.pathSignature) {
       return "path";
+    }
+
+    if (previousSnapshot.basic.defaultsSignature !== nextSnapshot.basic.defaultsSignature) {
+      return "defaults";
     }
 
     return null;
@@ -685,27 +749,6 @@ function DraftCard({
   );
 }
 
-function Pill({
-  surfaceTheme,
-  label
-}: {
-  surfaceTheme: SurfaceTheme;
-  label: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.16em]",
-        surfaceTheme === "light"
-          ? "border-[#e4ddd3] bg-[#f6f1ea] text-[#6c645b]"
-          : "border-white/10 bg-white/[0.05] text-slate-300"
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
 function StatusPill({
   surfaceTheme,
   tone,
@@ -730,6 +773,325 @@ function StatusPill({
       {label}
     </span>
   );
+}
+
+type BasicRuleToggleKey = keyof Pick<
+  WorkspaceCreateRules,
+  "generateStarterDocs" | "generateMemory" | "kickoffMission"
+>;
+
+function BasicSetupCard({
+  surfaceTheme,
+  template,
+  rules,
+  preset,
+  onRuleToggle
+}: {
+  surfaceTheme: SurfaceTheme;
+  template: WorkspaceTemplate;
+  rules: WorkspaceCreateRules;
+  preset: WorkspaceWizardQuickSetupPreset;
+  onRuleToggle: (rule: BasicRuleToggleKey) => void;
+}) {
+  const isLight = surfaceTheme === "light";
+  const toggleItems = buildBasicSetupToggleItems(template, rules);
+  const filePreview = buildWorkspaceScaffoldPreview(template, rules);
+  const presetSummary =
+    preset === "fastest"
+      ? "Fastest setup keeps only the core agent files and skips kickoff."
+      : preset === "custom"
+        ? "Custom setup keeps only the extras you left enabled."
+        : "Standard setup creates starter docs, memory, and a kickoff mission.";
+
+  return (
+    <div className="mt-3 space-y-4">
+      {preset === "custom" ? (
+        <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Custom mix" />
+      ) : null}
+
+      <div className="space-y-2">
+        {toggleItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={item.rule ? () => onRuleToggle(item.rule) : undefined}
+            disabled={!item.rule}
+            className={cn(
+              "w-full rounded-[18px] border px-3 py-3 text-left transition-colors",
+              isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]",
+              item.rule
+                ? isLight
+                  ? "hover:border-[#d8c9ba] hover:bg-[#f6efe6]"
+                  : "hover:border-white/15 hover:bg-white/[0.05]"
+                : "cursor-default"
+            )}
+          >
+            <div className="flex items-start gap-3">
+              <span
+                className={cn(
+                  "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-md border",
+                  item.checked
+                    ? isLight
+                      ? "border-[#1f1b17] bg-[#1f1b17] text-white"
+                      : "border-cyan-300 bg-cyan-300 text-slate-950"
+                    : isLight
+                      ? "border-[#d9d0c6] bg-white text-transparent"
+                      : "border-white/15 bg-transparent text-transparent"
+                )}
+              >
+                <Check className="h-3 w-3" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className={cn("text-[13px] font-medium", isLight ? "text-[#171410]" : "text-white")}>
+                    {item.title}
+                  </p>
+                  {item.locked ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]",
+                        isLight
+                          ? "border-[#e0d7cc] bg-white text-[#7a7168]"
+                          : "border-white/10 bg-white/[0.05] text-slate-400"
+                      )}
+                    >
+                      <LockKeyhole className="h-3 w-3" />
+                      Required
+                    </span>
+                  ) : null}
+                </div>
+                <p className={cn("mt-1 text-[12px] leading-5", isLight ? "text-[#776f65]" : "text-slate-400")}>
+                  {item.description}
+                </p>
+                {item.files.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {item.files.map((file) => (
+                      <FileToken key={file} surfaceTheme={surfaceTheme} label={file} />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div
+        className={cn(
+          "rounded-[18px] border px-3 py-3",
+          isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]"
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <FileText className={cn("h-4 w-4", isLight ? "text-[#5f5952]" : "text-slate-300")} />
+          <p className={cn("text-[12px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
+            Will create
+          </p>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {filePreview.map((file) => (
+            <FileToken key={file} surfaceTheme={surfaceTheme} label={file} />
+          ))}
+          {rules.kickoffMission ? <FileToken surfaceTheme={surfaceTheme} label="Kickoff mission" accent /> : null}
+        </div>
+      </div>
+
+      <p className={cn("text-[13px] leading-6", isLight ? "text-[#70685f]" : "text-slate-300")}>
+        {presetSummary} Need more control later? Switch to Advanced and keep the same draft.
+      </p>
+    </div>
+  );
+}
+
+function SetupSpeedCard({
+  surfaceTheme,
+  mode,
+  preset,
+  onPresetChange
+}: {
+  surfaceTheme: SurfaceTheme;
+  mode: WorkspaceWizardMode;
+  preset: WorkspaceWizardQuickSetupPreset;
+  onPresetChange: (preset: WorkspaceWizardQuickSetupPreset) => void;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div
+      className={cn(
+        "rounded-[22px] border p-4",
+        isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]"
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>
+            Setup speed
+          </p>
+          <p className={cn("mt-1 text-[13px] leading-6", isLight ? "text-[#70685f]" : "text-slate-300")}>
+            {mode === "basic"
+              ? "Choose how much scaffold the fast create path should write before the workspace opens."
+              : "These presets also work in Advanced and update the workspace bootstrap rules."}
+          </p>
+        </div>
+        {preset === "custom" ? <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Custom mix" /> : null}
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <PresetButton
+          surfaceTheme={surfaceTheme}
+          active={preset === "standard"}
+          title="Standard"
+          description="Docs, memory, and kickoff mission"
+          onClick={() => onPresetChange("standard")}
+        />
+        <PresetButton
+          surfaceTheme={surfaceTheme}
+          active={preset === "fastest"}
+          title="Fastest setup"
+          description="Core files only, no kickoff"
+          onClick={() => onPresetChange("fastest")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PresetButton({
+  surfaceTheme,
+  active,
+  title,
+  description,
+  onClick
+}: {
+  surfaceTheme: SurfaceTheme;
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-[18px] border px-3 py-3 text-left transition-colors",
+        active
+          ? isLight
+            ? "border-[#1f1b17] bg-[#1f1b17] text-white"
+            : "border-cyan-300 bg-cyan-300/15 text-cyan-50"
+          : isLight
+            ? "border-[#e8e0d6] bg-[#faf6f1] text-[#171410] hover:border-[#d8c9ba] hover:bg-[#f6efe6]"
+            : "border-white/10 bg-white/[0.03] text-white hover:border-white/15 hover:bg-white/[0.05]"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <Zap className="h-4 w-4" />
+        <p className="text-[13px] font-medium">{title}</p>
+      </div>
+      <p
+        className={cn(
+          "mt-1 text-[12px] leading-5",
+          active ? "opacity-80" : isLight ? "text-[#776f65]" : "text-slate-400"
+        )}
+      >
+        {description}
+      </p>
+    </button>
+  );
+}
+
+function FileToken({
+  surfaceTheme,
+  label,
+  accent = false
+}: {
+  surfaceTheme: SurfaceTheme;
+  label: string;
+  accent?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[10px]",
+        accent
+          ? surfaceTheme === "light"
+            ? "border-[#d8b184] bg-[#f8efe3] text-[#7c5a34]"
+            : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+          : surfaceTheme === "light"
+            ? "border-[#e4ddd3] bg-white text-[#6c645b]"
+            : "border-white/10 bg-white/[0.05] text-slate-300"
+      )}
+    >
+      <Check className="mr-1 h-3 w-3" />
+      {label}
+    </span>
+  );
+}
+
+function buildBasicSetupToggleItems(template: WorkspaceTemplate, rules: WorkspaceCreateRules) {
+  const templateSpecificFiles = getTemplateSpecificFiles(template);
+
+  return [
+    {
+      id: "core",
+      title: "Core agent files",
+      description: "Required bootstrap files that define the workspace identity and operating instructions.",
+      checked: true,
+      locked: true,
+      files: ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"],
+      rule: undefined
+    },
+    {
+      id: "docs",
+      title: "Starter docs",
+      description: "Brief, architecture notes, and the initial deliverables handoff scaffold.",
+      checked: rules.generateStarterDocs,
+      locked: false,
+      files: ["docs/brief.md", "docs/architecture.md", "deliverables/README.md", ...templateSpecificFiles],
+      rule: "generateStarterDocs" as const
+    },
+    {
+      id: "memory",
+      title: "Memory files",
+      description: "Durable project memory for blueprint decisions and accumulated context.",
+      checked: rules.generateMemory,
+      locked: false,
+      files: ["MEMORY.md", "memory/blueprint.md", "memory/decisions.md"],
+      rule: "generateMemory" as const
+    },
+    {
+      id: "kickoff",
+      title: "Kickoff mission",
+      description: "Runs the first mission immediately after bootstrap so the agent starts with momentum.",
+      checked: rules.kickoffMission,
+      locked: false,
+      files: [],
+      rule: "kickoffMission" as const
+    }
+  ];
+}
+
+function getTemplateSpecificFiles(template: WorkspaceTemplate) {
+  if (template === "frontend") {
+    return ["docs/ux-notes.md"];
+  }
+
+  if (template === "backend") {
+    return ["docs/service-map.md"];
+  }
+
+  if (template === "research") {
+    return ["docs/research-plan.md"];
+  }
+
+  if (template === "content") {
+    return ["docs/content-brief.md"];
+  }
+
+  return [];
 }
 
 function ReadinessList({

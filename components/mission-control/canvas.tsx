@@ -304,9 +304,7 @@ function buildCanvasGraph(
 
   const workspaceNodes: WorkspaceCanvasNode[] = [];
   const contentNodes: Array<AgentCanvasNode | RuntimeCanvasNode> = [];
-  const graphRuntimes: RuntimeRecord[] = snapshot.runtimes.filter(
-    (runtime) => !hiddenRuntimeIds.includes(runtime.id)
-  );
+  const graphRuntimes: RuntimeRecord[] = [];
 
   visibleWorkspaces.forEach((workspace, workspaceIndex) => {
     const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
@@ -324,13 +322,14 @@ function buildCanvasGraph(
       const agentRuntimes = workspaceRuntimes
         .filter((runtime) => runtime.agentId === agent.id)
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+      const canvasRuntimes = collapseCanvasRuntimes(agentRuntimes);
       const pendingRuntime =
         pendingMission &&
         pendingMission.agentId === agent.id &&
         (!pendingMission.workspaceId || pendingMission.workspaceId === workspace.id)
           ? createPendingRuntime(pendingMission, workspace.id, agent.modelId)
           : null;
-      const visibleRuntimes = pendingRuntime ? [pendingRuntime, ...agentRuntimes] : agentRuntimes;
+      const visibleRuntimes = pendingRuntime ? [pendingRuntime, ...canvasRuntimes] : canvasRuntimes;
       const agentY = laneY + agentIndex * 4;
 
       contentNodes.push({
@@ -351,6 +350,8 @@ function buildCanvasGraph(
       if (pendingRuntime) {
         graphRuntimes.unshift(pendingRuntime);
       }
+
+      graphRuntimes.push(...canvasRuntimes);
 
       visibleRuntimes.forEach((runtime, runtimeIndex) => {
         const isPendingRuntime = runtime.id.startsWith("pending-runtime:");
@@ -400,6 +401,56 @@ function buildCanvasGraph(
 
   const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes];
   return { nodes, edges: buildEdgesForNodes(graphRuntimes, nodes) };
+}
+
+function collapseCanvasRuntimes(runtimes: RuntimeRecord[]) {
+  if (runtimes.length <= 1) {
+    return runtimes;
+  }
+
+  const sorted = [...runtimes].sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const taskLikeRuntimes = sorted.filter((runtime) => isCanvasTaskRuntime(runtime));
+
+  if (taskLikeRuntimes.length > 0) {
+    return dedupeCanvasRuntimes(taskLikeRuntimes);
+  }
+
+  const latestTurnRuntime = sorted.find((runtime) => runtime.source === "turn");
+  return latestTurnRuntime ? [latestTurnRuntime] : dedupeCanvasRuntimes(sorted.slice(0, 1));
+}
+
+function dedupeCanvasRuntimes(runtimes: RuntimeRecord[]) {
+  const seen = new Set<string>();
+  const collapsed: RuntimeRecord[] = [];
+
+  for (const runtime of runtimes) {
+    const groupKey =
+      runtime.taskId ||
+      (runtime.source === "session" ? runtime.sessionId || runtime.id : null) ||
+      (typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId : null) ||
+      runtime.id;
+
+    if (seen.has(groupKey)) {
+      continue;
+    }
+
+    seen.add(groupKey);
+    collapsed.push(runtime);
+  }
+
+  return collapsed;
+}
+
+function isCanvasTaskRuntime(runtime: RuntimeRecord) {
+  if (runtime.id.startsWith("pending-runtime:")) {
+    return true;
+  }
+
+  if (runtime.source !== "turn") {
+    return true;
+  }
+
+  return typeof runtime.metadata.dispatchId === "string";
 }
 
 function buildEdgesForNodes(runtimes: RuntimeRecord[], nodes: CanvasNode[]) {

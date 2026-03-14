@@ -10,6 +10,7 @@ import {
   createOperationProgressTracker
 } from "@/lib/openclaw/operation-progress";
 import {
+  applyPlannerInput,
   applyPlannerTemplate,
   createPlannerAgentSpec,
   createPlannerAutomationSpec,
@@ -22,8 +23,10 @@ import {
   createPlannerRuntimeState,
   createPlannerSandboxSpec,
   createPlannerWorkflowSpec,
+  detectPlannerTextLanguage,
   enrichWorkspacePlan,
   getPlannerWorkspaceSizeProfile,
+  resolvePlannerReplyLanguage,
   synthesizePlannerAdvisors
 } from "@/lib/openclaw/planner-core";
 import {
@@ -250,19 +253,16 @@ export async function submitWorkspacePlanTurn(
   const basePlan = incomingPlan
     ? await persistIncomingPlan(planId, incomingPlan)
     : await readWorkspacePlan(planId);
-  let nextPlan = enrichWorkspacePlan(basePlan);
-  const harvestedContext = await harvestPlannerContext(trimmedMessage);
-
+  const harvestedContextPromise = harvestPlannerContext(trimmedMessage);
+  let nextPlan = applyPlannerInput(enrichWorkspacePlan(basePlan), trimmedMessage);
   nextPlan.conversation.push(createPlannerMessage("user", "Operator", trimmedMessage));
-  nextPlan.intake.started = true;
-  if (!nextPlan.intake.initialPrompt) {
-    nextPlan.intake.initialPrompt = trimmedMessage;
-  }
-  nextPlan.intake.latestPrompt = trimmedMessage;
+  const harvestedContext = await harvestedContextPromise;
   nextPlan.intake.sources = mergePlannerSources(nextPlan.intake.sources, harvestedContext.sources);
   nextPlan = enrichWorkspacePlan(nextPlan);
 
-  const runtimeReadyPlan = await ensurePlannerRuntime(nextPlan);
+  const runtimeReadyPlan = shouldUseLocalPlannerFastPath(nextPlan)
+    ? nextPlan
+    : await ensurePlannerRuntime(nextPlan);
   const shouldUseAdvisorBoard =
     runtimeReadyPlan.autopilot &&
     (runtimeReadyPlan.intake.reviewRequested || runtimeReadyPlan.intake.turnCount > 2);
@@ -889,7 +889,7 @@ async function runArchitectPlannerTurn(
       agentId: plan.runtime.architectAgentId,
       sessionId: plan.runtime.architectSessionId,
       message: buildPlannerArchitectPrompt(plan, latestMessage, harvestedContext, advisorNotes),
-      thinking: "high"
+      thinking: resolveArchitectThinking(plan)
     });
 
     let nextPlan = structuredClone(plan);
@@ -913,11 +913,15 @@ async function runArchitectPlannerTurn(
       lastError: undefined
     });
 
+    const enrichedPlan = enrichWorkspacePlan(nextPlan);
+    const fallbackReply = createArchitectReply(enrichedPlan, advisorNotes, latestMessage, previousPlan).text;
+
     return {
-      plan: enrichWorkspacePlan(nextPlan),
+      plan: enrichedPlan,
       reply: formatArchitectAgentReply(
         result.response,
-        createArchitectReply(nextPlan, advisorNotes, latestMessage, previousPlan).text
+        fallbackReply,
+        resolvePlannerReplyLanguage(enrichedPlan, latestMessage)
       )
     };
   } catch (error) {
@@ -994,6 +998,7 @@ function buildPlannerArchitectPrompt(
     "- Do not ask about non-goals, polish, or V1 exclusions until mission, audience, and offer are already grounded.",
     "- Keep reply concise, concrete, and operator-facing.",
     "- Reply in the same language as the operator's latest message.",
+    "- If the operator switches languages, follow the latest message only. Do not stick to an older language from earlier turns.",
     "- Treat colloquial Turkish and informal phrasing as first-class input. Infer names, roles, and intent from natural speech instead of waiting for rigid formatting.",
     "- When the operator gives a company or workspace name, apply it immediately.",
     "- Take initiative. If the intent is clear but some details are ambiguous, choose the likeliest workable default, apply it, and tell the operator what you assumed.",
@@ -1073,9 +1078,15 @@ function buildPlannerAdvisorPrompt(
 
 function formatArchitectAgentReply(
   response: PlannerArchitectAgentResponse,
-  fallbackReply: string
+  fallbackReply: string,
+  expectedLanguage: "en" | "tr"
 ) {
-  const isTurkish = /[çğıöşüÇĞİÖŞÜ]/.test(response.reply ?? "") || /\b(ve|bir|için|ile|olarak|hedef|ilk|şu|bu)\b/i.test(response.reply ?? "");
+  const replyLanguage = detectPlannerTextLanguage(response.reply);
+  if (replyLanguage && replyLanguage !== expectedLanguage) {
+    return fallbackReply;
+  }
+
+  const isTurkish = expectedLanguage === "tr";
   const sections = [
     response.reply?.trim(),
     response.assumptions?.length
@@ -1090,6 +1101,18 @@ function formatArchitectAgentReply(
   ].filter(Boolean);
 
   return sections.join("\n\n") || fallbackReply;
+}
+
+function shouldUseLocalPlannerFastPath(plan: WorkspacePlan) {
+  return !plan.intake.reviewRequested && plan.intake.turnCount <= 1 && plan.runtime.status !== "ready";
+}
+
+function resolveArchitectThinking(plan: WorkspacePlan) {
+  if (plan.intake.reviewRequested) {
+    return "high";
+  }
+
+  return plan.intake.turnCount <= 2 ? "low" : "medium";
 }
 
 function createPlannerPromptContext(plan: WorkspacePlan) {

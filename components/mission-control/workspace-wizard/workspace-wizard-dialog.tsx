@@ -371,6 +371,10 @@ export function WorkspaceWizardDialog({
               sourceAnalysis={wizard.sourceAnalysis}
               workspacePath={workspacePath}
               notice={wizard.notice}
+              basicRules={wizard.basicRules}
+              basicPreset={wizard.basicPreset}
+              onBasicPresetChange={wizard.setBasicPreset}
+              onBasicRuleToggle={wizard.toggleBasicRule}
               progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
             />
           </div>
@@ -417,6 +421,10 @@ export function WorkspaceWizardDialog({
                 sourceAnalysis={wizard.sourceAnalysis}
                 workspacePath={workspacePath}
                 notice={wizard.notice}
+                basicRules={wizard.basicRules}
+                basicPreset={wizard.basicPreset}
+                onBasicPresetChange={wizard.setBasicPreset}
+                onBasicRuleToggle={wizard.toggleBasicRule}
                 progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
               />
             </div>
