@@ -47,6 +47,7 @@ export function MissionCanvas({
   selectedNodeId,
   recentDispatchId,
   hiddenRuntimeIds,
+  hiddenTaskKeys,
   onEditAgent,
   onDeleteAgent,
   onReplyTask,
@@ -60,6 +61,7 @@ export function MissionCanvas({
   selectedNodeId: string | null;
   recentDispatchId: string | null;
   hiddenRuntimeIds: string[];
+  hiddenTaskKeys: string[];
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onReplyTask: (task: TaskRecord) => void;
@@ -79,6 +81,7 @@ export function MissionCanvas({
     activeWorkspaceId,
     justCreatedTaskIds,
     hiddenRuntimeIds,
+    hiddenTaskKeys,
     onEditAgent,
     onDeleteAgent,
     onReplyTask,
@@ -94,6 +97,7 @@ export function MissionCanvas({
       activeWorkspaceId,
       justCreatedTaskIds,
       hiddenRuntimeIds,
+      hiddenTaskKeys,
       onEditAgent,
       onDeleteAgent,
       onReplyTask,
@@ -107,6 +111,7 @@ export function MissionCanvas({
     activeWorkspaceId,
     justCreatedTaskIds,
     hiddenRuntimeIds,
+    hiddenTaskKeys,
     onEditAgent,
     onDeleteAgent,
     onReplyTask,
@@ -134,7 +139,7 @@ export function MissionCanvas({
     const resolvedTask = snapshot.tasks
       .filter(
         (task) =>
-          !isTaskHidden(task, hiddenRuntimeIds) &&
+          !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys) &&
           task.dispatchId === recentDispatchId &&
           task.metadata.optimistic !== true
       )
@@ -152,7 +157,7 @@ export function MissionCanvas({
       setFocusTaskId
     );
     onSelectNode(resolvedTask.id);
-  }, [snapshot.tasks, recentDispatchId, hiddenRuntimeIds, onSelectNode]);
+  }, [snapshot.tasks, recentDispatchId, hiddenRuntimeIds, hiddenTaskKeys, onSelectNode]);
 
   useEffect(() => {
     const creationTimeouts = creationTimeoutsRef.current;
@@ -261,6 +266,7 @@ function buildCanvasGraph(
   activeWorkspaceId: string | null,
   justCreatedTaskIds: string[],
   hiddenRuntimeIds: string[],
+  hiddenTaskKeys: string[],
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
   onReplyTask: (task: TaskRecord) => void,
@@ -280,7 +286,8 @@ function buildCanvasGraph(
   visibleWorkspaces.forEach((workspace, workspaceIndex) => {
     const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
     const workspaceTasks = snapshot.tasks.filter(
-      (task) => task.workspaceId === workspace.id && !isTaskHidden(task, hiddenRuntimeIds)
+      (task) =>
+        task.workspaceId === workspace.id && !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys)
     );
     const groupX = (workspaceIndex % 2) * 1160 + 44;
     const groupY = Math.floor(workspaceIndex / 2) * 920 + 42;
@@ -312,7 +319,13 @@ function buildCanvasGraph(
       graphTasks.push(...agentTasks);
 
       agentTasks.forEach((task, taskIndex) => {
-        const isBootstrapTask = typeof task.metadata.bootstrapStage === "string";
+        const bootstrapStage = typeof task.metadata.bootstrapStage === "string" ? task.metadata.bootstrapStage : null;
+        const isBootstrapTask =
+          bootstrapStage === "submitting" ||
+          bootstrapStage === "accepted" ||
+          bootstrapStage === "waiting-for-heartbeat" ||
+          bootstrapStage === "waiting-for-runtime" ||
+          bootstrapStage === "runtime-observed";
         const isJustCreatedTask = justCreatedTaskIds.includes(task.id);
 
         contentNodes.push({
@@ -396,7 +409,11 @@ function buildEdgesForNodes(tasks: TaskRecord[], nodes: CanvasNode[]) {
   return edges;
 }
 
-function isTaskHidden(task: TaskRecord, hiddenRuntimeIds: string[]) {
+function isTaskHidden(task: TaskRecord, hiddenRuntimeIds: string[], hiddenTaskKeys: string[]) {
+  if (hiddenTaskKeys.includes(task.key)) {
+    return true;
+  }
+
   if (task.runtimeIds.length === 0) {
     return false;
   }

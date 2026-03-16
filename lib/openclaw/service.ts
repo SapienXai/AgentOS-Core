@@ -915,9 +915,10 @@ function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair {
 function buildTaskRecords(runtimes: RuntimeRecord[], agents: OpenClawAgent[]): TaskRecord[] {
   const groups = new Map<string, RuntimeRecord[]>();
   const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+  const dispatchIdBySessionKey = buildDispatchIdBySessionKey(runtimes);
 
   for (const runtime of runtimes) {
-    const groupKey = resolveTaskGroupKey(runtime);
+    const groupKey = resolveTaskGroupKey(runtime, dispatchIdBySessionKey);
     const group = groups.get(groupKey) ?? [];
     group.push(runtime);
     groups.set(groupKey, group);
@@ -936,17 +937,23 @@ function buildTaskRecord(
   agentNameById: Map<string, string>
 ): TaskRecord {
   const sortedRuntimes = [...runtimes].sort(sortRuntimesByUpdatedAtDesc);
+  const signalRuntimes = selectTaskSignalRuntimes(sortedRuntimes);
   const primaryRuntime =
-    [...sortedRuntimes].sort((left, right) => scoreTaskRuntime(right) - scoreTaskRuntime(left))[0] ??
+    [...signalRuntimes].sort((left, right) => scoreTaskRuntime(right) - scoreTaskRuntime(left))[0] ??
+    signalRuntimes[0] ??
     sortedRuntimes[0];
   const mission =
     resolveRuntimeMissionText(primaryRuntime) ||
     sortedRuntimes.map((runtime) => resolveRuntimeMissionText(runtime)).find(Boolean) ||
     null;
   const subtitle =
+    signalRuntimes
+      .map((runtime) => runtime.subtitle?.trim())
+      .find((value): value is string => Boolean(value)) ||
     sortedRuntimes
       .map((runtime) => runtime.subtitle?.trim())
-      .find((value): value is string => Boolean(value)) || "Awaiting OpenClaw updates.";
+      .find((value): value is string => Boolean(value)) ||
+    "Awaiting OpenClaw updates.";
   const createdFiles = dedupeCreatedFiles(
     sortedRuntimes.flatMap((runtime) => extractCreatedFilesFromRuntimeMetadata(runtime))
   );
@@ -972,9 +979,9 @@ function buildTaskRecord(
     title: mission || primaryRuntime?.title || "Untitled task",
     mission,
     subtitle,
-    status: resolveTaskStatus(sortedRuntimes),
-    updatedAt: sortedRuntimes[0]?.updatedAt ?? null,
-    ageMs: sortedRuntimes[0]?.ageMs ?? null,
+    status: resolveTaskStatus(signalRuntimes),
+    updatedAt: signalRuntimes[0]?.updatedAt ?? sortedRuntimes[0]?.updatedAt ?? null,
+    ageMs: signalRuntimes[0]?.ageMs ?? sortedRuntimes[0]?.ageMs ?? null,
     workspaceId: primaryRuntime?.workspaceId,
     primaryAgentId,
     primaryAgentName,
@@ -985,8 +992,8 @@ function buildTaskRecord(
     sessionIds,
     runIds,
     runtimeCount: sortedRuntimes.length,
-    updateCount: sortedRuntimes.filter((runtime) => runtime.source === "turn").length,
-    liveRunCount: sortedRuntimes.filter((runtime) => runtime.status === "running" || runtime.status === "queued").length,
+    updateCount: signalRuntimes.filter((runtime) => runtime.source === "turn").length,
+    liveRunCount: signalRuntimes.filter((runtime) => runtime.status === "running" || runtime.status === "queued").length,
     artifactCount: createdFiles.length,
     warningCount: warnings.length,
     tokenUsage,
@@ -1021,15 +1028,62 @@ function buildTaskRecord(
   };
 }
 
-function resolveTaskGroupKey(runtime: RuntimeRecord) {
+function selectTaskSignalRuntimes(runtimes: RuntimeRecord[]) {
+  const turnRuntimes = runtimes.filter(
+    (runtime) => runtime.source === "turn" || typeof runtime.metadata.turnId === "string"
+  );
+
+  if (turnRuntimes.length > 0) {
+    return turnRuntimes;
+  }
+
+  const dispatchRuntimes = runtimes.filter(
+    (runtime) =>
+      typeof runtime.metadata.dispatchId === "string" ||
+      typeof runtime.metadata.bootstrapStage === "string"
+  );
+
+  if (dispatchRuntimes.length > 0) {
+    return dispatchRuntimes;
+  }
+
+  return runtimes;
+}
+
+function buildDispatchIdBySessionKey(runtimes: RuntimeRecord[]) {
+  const dispatchIdBySessionKey = new Map<string, string>();
+
+  for (const runtime of runtimes) {
+    const sessionId = runtime.sessionId?.trim();
+    const dispatchId =
+      typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+
+    if (!sessionId || !dispatchId) {
+      continue;
+    }
+
+    dispatchIdBySessionKey.set(`${runtime.agentId ?? "unknown"}:${sessionId}`, dispatchId);
+  }
+
+  return dispatchIdBySessionKey;
+}
+
+function resolveTaskGroupKey(runtime: RuntimeRecord, dispatchIdBySessionKey: Map<string, string>) {
   const taskId = runtime.taskId?.trim();
   const dispatchId =
     typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
   const mission = resolveRuntimeMissionText(runtime);
   const sessionId = runtime.sessionId?.trim();
+  const sessionDispatchId = sessionId
+    ? dispatchIdBySessionKey.get(`${runtime.agentId ?? "unknown"}:${sessionId}`)?.trim() ?? ""
+    : "";
 
   if (dispatchId) {
     return `dispatch:${dispatchId}`;
+  }
+
+  if (sessionDispatchId) {
+    return `dispatch:${sessionDispatchId}`;
   }
 
   if (taskId) {
@@ -1065,19 +1119,20 @@ function resolveRuntimeMissionText(runtime: RuntimeRecord) {
 
 function scoreTaskRuntime(runtime: RuntimeRecord) {
   const hasMission = resolveRuntimeMissionText(runtime) ? 8 : 0;
+  const dispatchScore = typeof runtime.metadata.dispatchId === "string" ? 6 : 0;
   const sourceScore = runtime.source === "turn" ? 6 : runtime.source === "session" ? 4 : 2;
   const statusScore =
     runtime.status === "running"
-      ? 5
+      ? 3
       : runtime.status === "queued"
-        ? 4
+        ? 2
         : runtime.status === "stalled"
           ? 3
           : runtime.status === "idle"
             ? 2
             : 1;
 
-  return hasMission + sourceScore + statusScore;
+  return hasMission + dispatchScore + sourceScore + statusScore;
 }
 
 function resolveTaskStatus(runtimes: RuntimeRecord[]): RuntimeRecord["status"] {
@@ -1490,17 +1545,16 @@ async function buildMissionDispatchRuntimes(currentRuntimes: RuntimeRecord[]) {
     const observedRuntime = await buildObservedMissionDispatchRuntime(record);
 
     if (observedRuntime) {
-      await reconcileMissionDispatchRuntimeState(record, observedRuntime);
+      if (record.status !== "completed" && record.status !== "stalled") {
+        await reconcileMissionDispatchRuntimeState(record, observedRuntime);
+      }
+
       syntheticRuntimes.push(
         buildMissionDispatchTranscriptRuntime(
           (await readMissionDispatchRecordById(record.id)) ?? record,
           observedRuntime.sessionId ?? extractMissionDispatchSessionId(record) ?? undefined
         )
       );
-      continue;
-    }
-
-    if (record.observation.runtimeId) {
       continue;
     }
 
@@ -1632,10 +1686,6 @@ async function reconcileMissionDispatchRuntimeState(record: MissionDispatchRecor
 }
 
 async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord) {
-  if (record.status === "completed" || record.status === "stalled") {
-    return null;
-  }
-
   const sessionId = extractMissionDispatchSessionId(record);
 
   if (!record.agentId || !sessionId) {
@@ -1766,22 +1816,95 @@ function shouldPruneMissionDispatchRecord(record: MissionDispatchRecord, nowMs: 
 
 function matchMissionDispatchToRuntime(record: MissionDispatchRecord, runtimes: RuntimeRecord[]) {
   const submittedAt = Date.parse(record.submittedAt);
+  const nowMs = Date.now();
+  const effectiveStatus = resolveMissionDispatchRuntimeStatus(record, nowMs);
   const sessionId = extractMissionDispatchSessionId(record);
+  const observedRuntimeId = record.observation.runtimeId?.trim() || null;
+
+  if (shouldPreferSyntheticMissionDispatchRuntime(observedRuntimeId, runtimes, effectiveStatus)) {
+    return null;
+  }
 
   return runtimes
-    .filter(
-      (runtime) =>
-        !isSyntheticDispatchRuntime(runtime) &&
-        runtime.agentId === record.agentId &&
-        (!sessionId || runtime.sessionId === sessionId) &&
-        (runtime.source !== "turn" ||
-          matchesMissionRuntime(runtime, record.mission, {
-            agentId: record.agentId,
-            submittedAt
-          })) &&
-        (runtime.updatedAt ?? 0) >= (Number.isNaN(submittedAt) ? 0 : submittedAt - 1500)
-    )
-    .sort(sortRuntimesByUpdatedAtDesc)[0];
+    .map((runtime) => ({
+      runtime,
+      score: scoreMissionDispatchRuntimeMatch(runtime, record, {
+        submittedAt,
+        sessionId,
+        observedRuntimeId,
+        effectiveStatus
+      })
+    }))
+    .filter((entry): entry is { runtime: RuntimeRecord; score: number } => typeof entry.score === "number")
+    .sort((left, right) => right.score - left.score || sortRuntimesByUpdatedAtDesc(left.runtime, right.runtime))[0]
+    ?.runtime;
+}
+
+function shouldPreferSyntheticMissionDispatchRuntime(
+  observedRuntimeId: string | null,
+  runtimes: RuntimeRecord[],
+  status: RuntimeRecord["status"]
+) {
+  if ((status !== "completed" && status !== "stalled") || !observedRuntimeId) {
+    return false;
+  }
+
+  return !runtimes.some((runtime) => runtime.id === observedRuntimeId);
+}
+
+function scoreMissionDispatchRuntimeMatch(
+  runtime: RuntimeRecord,
+  record: MissionDispatchRecord,
+  options: {
+    submittedAt: number;
+    sessionId: string | null;
+    observedRuntimeId: string | null;
+    effectiveStatus: RuntimeRecord["status"];
+  }
+) {
+  if (isSyntheticDispatchRuntime(runtime) || runtime.agentId !== record.agentId) {
+    return null;
+  }
+
+  const runtimeDispatchId =
+    typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+
+  if (runtimeDispatchId && runtimeDispatchId !== record.id) {
+    return null;
+  }
+
+  if ((runtime.updatedAt ?? 0) < (Number.isNaN(options.submittedAt) ? 0 : options.submittedAt - 1500)) {
+    return null;
+  }
+
+  if (options.effectiveStatus === "completed" || options.effectiveStatus === "stalled") {
+    return runtimeDispatchId === record.id ? 500 : null;
+  }
+
+  if (options.observedRuntimeId && runtime.id === options.observedRuntimeId) {
+    return 10_000;
+  }
+
+  if (options.sessionId && runtime.sessionId !== options.sessionId) {
+    return null;
+  }
+
+  const missionMatches = matchesMissionRuntime(runtime, record.mission, {
+    agentId: record.agentId,
+    submittedAt: options.submittedAt
+  });
+
+  if (runtime.source === "turn" && !missionMatches) {
+    return null;
+  }
+
+  let score = 0;
+  score += runtime.source === "turn" ? 400 : runtime.source === "session" ? 40 : 20;
+  score += missionMatches ? 240 : 0;
+  score += options.sessionId && runtime.sessionId === options.sessionId ? 120 : 0;
+  score += runtimeDispatchId === record.id ? 80 : 0;
+
+  return score;
 }
 
 function isSyntheticDispatchRuntime(runtime: RuntimeRecord) {
@@ -1830,7 +1953,7 @@ function buildMissionDispatchTranscriptRuntime(record: MissionDispatchRecord, se
     title: summarizeText(record.mission, 38) || "Recovered mission runtime",
     subtitle:
       record.status === "completed"
-        ? "Recovered the completed runtime from the saved transcript."
+        ? summarizeText(resolveMissionDispatchCompletionDetail(record), 90)
         : record.status === "stalled"
           ? "Recovered the stalled runtime from the saved transcript."
           : "Recovering runtime state from the saved transcript.",
@@ -1946,11 +2069,7 @@ function resolveMissionDispatchSubtitle(
   status: RuntimeRecord["status"]
 ) {
   if (status === "completed") {
-    const completedSummary =
-      resolveMissionDispatchSummary(record) ||
-      resolveMissionDispatchResultText(record) ||
-      (record.outputDirRelative ? `Completed · ${record.outputDirRelative}` : "Completed in OpenClaw");
-    return summarizeText(completedSummary, 90);
+    return summarizeText(resolveMissionDispatchCompletionDetail(record), 90);
   }
 
   if (status === "stalled") {
@@ -2067,6 +2186,24 @@ function resolveMissionDispatchSummary(record: MissionDispatchRecord) {
 
 function resolveMissionDispatchResultText(record: MissionDispatchRecord) {
   return record.result?.result?.payloads?.find((payload) => payload.text.trim().length > 0)?.text.trim() ?? null;
+}
+
+function resolveMissionDispatchCompletionDetail(record: MissionDispatchRecord) {
+  const completedSummary = resolveMissionDispatchSummary(record) || resolveMissionDispatchResultText(record);
+
+  if (completedSummary) {
+    return completedSummary;
+  }
+
+  if (record.observation.observedAt) {
+    return "Dispatch runner finished. Waiting for the final runtime transcript to sync.";
+  }
+
+  if (record.outputDirRelative) {
+    return `Dispatch runner finished · ${record.outputDirRelative}`;
+  }
+
+  return "Dispatch runner finished.";
 }
 
 function createMissionDispatchResultFromRuntimeOutput(
@@ -4885,17 +5022,13 @@ function buildMissionDispatchFeed(
   }
 
   if (record.status === "completed") {
+    const completionSummary = resolveMissionDispatchSummary(record) || resolveMissionDispatchResultText(record);
     events.push({
       id: `${record.id}:completed`,
       kind: "status",
       timestamp: record.runner.finishedAt ?? record.updatedAt,
-      title: "Dispatch completed",
-      detail: summarizeText(
-        resolveMissionDispatchSummary(record) ||
-          resolveMissionDispatchResultText(record) ||
-          "The dispatch completed and handed off to OpenClaw.",
-        220
-      )
+      title: completionSummary ? "Mission finished" : "Dispatch runner finished",
+      detail: summarizeText(completionSummary || resolveMissionDispatchCompletionDetail(record), 220)
     });
   }
 

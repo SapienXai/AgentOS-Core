@@ -227,8 +227,10 @@ function resolveTaskBadgeLabel(
       return "going live";
     case "stalled":
       return "stalled";
+    case "completed":
+      return "completed";
     default:
-      return "starting";
+      return status;
   }
 }
 
