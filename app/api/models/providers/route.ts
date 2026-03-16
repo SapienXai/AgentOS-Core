@@ -319,7 +319,14 @@ async function readProviderCatalog(
   ]);
   const configuredModelIds = new Set(snapshot.models.map((model) => model.id));
 
-  return (payload.models || []).map((model) => ({
+  const uniqueModels = new Map<string, typeof payload.models[number]>();
+  for (const model of payload.models || []) {
+    if (!uniqueModels.has(model.key)) {
+      uniqueModels.set(model.key, model);
+    }
+  }
+
+  return Array.from(uniqueModels.values()).map((model) => ({
     id: model.key,
     name: model.name,
     provider,
