@@ -1915,18 +1915,24 @@ function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, record: Miss
   const currentDispatchId =
     typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
   const runtimeMission = resolveRuntimeMissionText(runtime);
+  const nextStatus = 
+    (record.status === "completed" || record.status === "stalled") 
+      ? record.status 
+      : runtime.status;
 
   if (
     currentDispatchId === record.id &&
     runtimeMission &&
     typeof runtime.metadata.dispatchStatus === "string" &&
-    runtime.metadata.dispatchStatus === record.status
+    runtime.metadata.dispatchStatus === record.status &&
+    runtime.status === nextStatus
   ) {
     return runtime;
   }
 
   return {
     ...runtime,
+    status: nextStatus,
     metadata: {
       ...runtime.metadata,
       dispatchId: record.id,
@@ -2102,7 +2108,7 @@ function resolveMissionDispatchSubtitle(
 }
 
 function extractMissionDispatchAgentMeta(record: MissionDispatchRecord) {
-  const meta = record.result?.result?.meta;
+  const meta = record.result?.result?.meta ?? record.result?.meta;
 
   if (!meta || typeof meta !== "object") {
     return null;
@@ -2159,15 +2165,24 @@ function extractMissionDispatchTokenUsage(record: MissionDispatchRecord): Runtim
   }
 
   const usageRecord = usage as Record<string, unknown>;
-  const total = extractMissionDispatchNumber(usageRecord, "total") ?? extractMissionDispatchNumber(usageRecord, "totalTokens");
+  const total =
+    extractMissionDispatchNumber(usageRecord, "total") ??
+    extractMissionDispatchNumber(usageRecord, "totalTokens") ??
+    extractMissionDispatchNumber(usageRecord, "total_tokens");
 
   if (total === null) {
     return undefined;
   }
 
   return {
-    input: extractMissionDispatchNumber(usageRecord, "input") ?? 0,
-    output: extractMissionDispatchNumber(usageRecord, "output") ?? 0,
+    input:
+      extractMissionDispatchNumber(usageRecord, "input") ??
+      extractMissionDispatchNumber(usageRecord, "prompt_tokens") ??
+      0,
+    output:
+      extractMissionDispatchNumber(usageRecord, "output") ??
+      extractMissionDispatchNumber(usageRecord, "completion_tokens") ??
+      0,
     total,
     cacheRead: extractMissionDispatchNumber(usageRecord, "cacheRead") ?? 0
   };
@@ -5295,11 +5310,15 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
       }
 
       if (role === "assistant" && entry.message.usage) {
+        const usage = entry.message.usage as any;
         currentTurn.tokenUsage = {
-          input: entry.message.usage.input ?? 0,
-          output: entry.message.usage.output ?? 0,
-          total: entry.message.usage.totalTokens ?? 0,
-          cacheRead: entry.message.usage.cacheRead ?? 0
+          input: usage.input ?? usage.prompt_tokens ?? 0,
+          output: usage.output ?? usage.completion_tokens ?? 0,
+          total:
+            usage.totalTokens ??
+            usage.total_tokens ??
+            (usage.input ?? usage.prompt_tokens ?? 0) + (usage.output ?? usage.completion_tokens ?? 0),
+          cacheRead: usage.cacheRead ?? 0
         };
       }
     } catch {
@@ -6162,11 +6181,11 @@ function mapRuntime(
     sessionId: session.sessionId,
     taskId,
     tokenUsage:
-      typeof session.totalTokens === "number"
+      typeof session.totalTokens === "number" || typeof session.inputTokens === "number"
         ? {
             input: session.inputTokens ?? 0,
             output: session.outputTokens ?? 0,
-            total: session.totalTokens,
+            total: session.totalTokens ?? (session.inputTokens ?? 0) + (session.outputTokens ?? 0),
             cacheRead: session.cacheRead ?? 0
           }
         : undefined,
