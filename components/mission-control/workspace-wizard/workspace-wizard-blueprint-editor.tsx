@@ -23,7 +23,41 @@ type SurfaceTheme = "dark" | "light";
 
 type BlueprintEditorTab = "fields" | "raw";
 
-export type WorkspaceBlueprintEditorFocus = "company" | "product" | "workspace" | "team" | "deploy" | "raw";
+type WorkspaceBlueprintSectionFocus = "company" | "product" | "workspace" | "team" | "deploy";
+type WorkspaceBlueprintFieldFocus =
+  | "company.name"
+  | "company.mission"
+  | "company.targetCustomer"
+  | "company.constraints"
+  | "company.successSignals"
+  | "product.offer"
+  | "product.revenueModel"
+  | "product.scopeV1"
+  | "product.nonGoals"
+  | "product.launchPriority"
+  | "workspace.name"
+  | "workspace.directory"
+  | "workspace.sourceMode"
+  | "workspace.repoUrl"
+  | "workspace.existingPath"
+  | "workspace.template"
+  | "workspace.modelProfile"
+  | "workspace.modelId"
+  | "workspace.stackDecisions"
+  | "workspace.docs"
+  | "workspace.ruleGenerateStarterDocs"
+  | "workspace.ruleGenerateMemory"
+  | "workspace.ruleKickoffMission"
+  | "team.allowEphemeralSubagents"
+  | "team.autopilot"
+  | "team.reviewRequested"
+  | "team.maxParallelRuns"
+  | "team.escalationRules"
+  | "deploy.blockers"
+  | "deploy.warnings"
+  | "deploy.firstMissions";
+
+export type WorkspaceBlueprintEditorFocus = WorkspaceBlueprintSectionFocus | WorkspaceBlueprintFieldFocus | "raw";
 
 type BlueprintDraft = {
   companyName: string;
@@ -69,6 +103,19 @@ type WorkspaceWizardBlueprintEditorProps = {
   onSave: (nextPlan: WorkspacePlan, summary: string) => Promise<boolean>;
 };
 
+function getBlueprintEditorSectionFocus(focus: WorkspaceBlueprintEditorFocus): WorkspaceBlueprintSectionFocus {
+  if (focus === "raw") {
+    return "workspace";
+  }
+
+  const [section] = focus.split(".") as [WorkspaceBlueprintSectionFocus, ...string[]];
+  return section;
+}
+
+function getBlueprintEditorFieldFocus(focus: WorkspaceBlueprintEditorFocus): WorkspaceBlueprintFieldFocus | null {
+  return focus.includes(".") ? (focus as WorkspaceBlueprintFieldFocus) : null;
+}
+
 export function WorkspaceWizardBlueprintEditor({
   open,
   surfaceTheme,
@@ -82,16 +129,20 @@ export function WorkspaceWizardBlueprintEditor({
   const [draft, setDraft] = useState<BlueprintDraft | null>(() => (plan ? createBlueprintDraftFromPlan(plan) : null));
   const [rawValue, setRawValue] = useState(() => (plan ? JSON.stringify(plan, null, 2) : ""));
   const [rawError, setRawError] = useState<string | null>(null);
-  const sectionRefs = useRef<Partial<Record<Exclude<WorkspaceBlueprintEditorFocus, "raw">, HTMLDivElement | null>>>({});
+  const sectionRefs = useRef<Partial<Record<WorkspaceBlueprintSectionFocus, HTMLDivElement | null>>>({});
+  const fieldRefs = useRef<Partial<Record<WorkspaceBlueprintFieldFocus, HTMLElement | null>>>({});
 
   const isLight = surfaceTheme === "light";
+  const focusSection = focus && focus !== "raw" ? getBlueprintEditorSectionFocus(focus) : null;
+  const focusField = focus && focus !== "raw" ? getBlueprintEditorFieldFocus(focus) : null;
 
   useEffect(() => {
     if (!open || !plan || !focus || focus === "raw" || tab !== "fields") {
       return;
     }
 
-    const target = sectionRefs.current[focus];
+    const sectionFocus = getBlueprintEditorSectionFocus(focus);
+    const target = focusField ? fieldRefs.current[focusField] ?? sectionRefs.current[sectionFocus] : sectionRefs.current[sectionFocus];
 
     if (!target) {
       return;
@@ -100,10 +151,14 @@ export function WorkspaceWizardBlueprintEditor({
     globalThis.requestAnimationFrame(() => {
       target.scrollIntoView({
         behavior: "smooth",
-        block: "start"
+        block: focusField ? "center" : "start"
       });
+
+      if (focusField && target === fieldRefs.current[focusField] && typeof target.focus === "function") {
+        target.focus({ preventScroll: true });
+      }
     });
-  }, [focus, open, plan, tab]);
+  }, [focus, focusField, open, plan, tab]);
 
   const canSave = Boolean(plan && draft);
 
@@ -113,6 +168,10 @@ export function WorkspaceWizardBlueprintEditor({
 
   const updateDraft = <K extends keyof BlueprintDraft>(key: K, value: BlueprintDraft[K]) => {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
+  };
+
+  const registerField = <T extends HTMLElement>(key: WorkspaceBlueprintFieldFocus) => (node: T | null) => {
+    fieldRefs.current[key] = node;
   };
 
   const handleFieldSave = async () => {
@@ -206,7 +265,7 @@ export function WorkspaceWizardBlueprintEditor({
                   <SectionCard
                     surfaceTheme={surfaceTheme}
                     sectionId="company"
-                    highlighted={focus === "company"}
+                    highlighted={focusSection === "company"}
                     title="Company"
                     description="Mission and audience details."
                     register={(node) => {
@@ -214,16 +273,30 @@ export function WorkspaceWizardBlueprintEditor({
                     }}
                   >
                     <FieldGroup label="Name">
-                      <Input value={draft.companyName} onChange={(event) => updateDraft("companyName", event.target.value)} />
+                      <Input
+                        ref={registerField("company.name")}
+                        value={draft.companyName}
+                        onChange={(event) => updateDraft("companyName", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Mission">
-                      <Textarea value={draft.companyMission} onChange={(event) => updateDraft("companyMission", event.target.value)} className="min-h-[96px]" />
+                      <Textarea
+                        ref={registerField("company.mission")}
+                        value={draft.companyMission}
+                        onChange={(event) => updateDraft("companyMission", event.target.value)}
+                        className="min-h-[96px]"
+                      />
                     </FieldGroup>
                     <FieldGroup label="Target customer">
-                      <Input value={draft.companyTargetCustomer} onChange={(event) => updateDraft("companyTargetCustomer", event.target.value)} />
+                      <Input
+                        ref={registerField("company.targetCustomer")}
+                        value={draft.companyTargetCustomer}
+                        onChange={(event) => updateDraft("companyTargetCustomer", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Constraints">
                       <Textarea
+                        ref={registerField("company.constraints")}
                         value={draft.companyConstraints}
                         onChange={(event) => updateDraft("companyConstraints", event.target.value)}
                         placeholder="One constraint per line"
@@ -232,6 +305,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="Success signals">
                       <Textarea
+                        ref={registerField("company.successSignals")}
                         value={draft.companySuccessSignals}
                         onChange={(event) => updateDraft("companySuccessSignals", event.target.value)}
                         placeholder="One signal per line"
@@ -243,7 +317,7 @@ export function WorkspaceWizardBlueprintEditor({
                   <SectionCard
                     surfaceTheme={surfaceTheme}
                     sectionId="product"
-                    highlighted={focus === "product"}
+                    highlighted={focusSection === "product"}
                     title="Product"
                     description="Offer and V1 shape."
                     register={(node) => {
@@ -251,13 +325,23 @@ export function WorkspaceWizardBlueprintEditor({
                     }}
                   >
                     <FieldGroup label="Offer">
-                      <Textarea value={draft.productOffer} onChange={(event) => updateDraft("productOffer", event.target.value)} className="min-h-[96px]" />
+                      <Textarea
+                        ref={registerField("product.offer")}
+                        value={draft.productOffer}
+                        onChange={(event) => updateDraft("productOffer", event.target.value)}
+                        className="min-h-[96px]"
+                      />
                     </FieldGroup>
                     <FieldGroup label="Revenue model">
-                      <Input value={draft.productRevenueModel} onChange={(event) => updateDraft("productRevenueModel", event.target.value)} />
+                      <Input
+                        ref={registerField("product.revenueModel")}
+                        value={draft.productRevenueModel}
+                        onChange={(event) => updateDraft("productRevenueModel", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Scope V1">
                       <Textarea
+                        ref={registerField("product.scopeV1")}
                         value={draft.productScopeV1}
                         onChange={(event) => updateDraft("productScopeV1", event.target.value)}
                         placeholder="One item per line"
@@ -266,6 +350,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="Non-goals">
                       <Textarea
+                        ref={registerField("product.nonGoals")}
                         value={draft.productNonGoals}
                         onChange={(event) => updateDraft("productNonGoals", event.target.value)}
                         placeholder="One item per line"
@@ -274,6 +359,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="Launch priority">
                       <Textarea
+                        ref={registerField("product.launchPriority")}
                         value={draft.productLaunchPriority}
                         onChange={(event) => updateDraft("productLaunchPriority", event.target.value)}
                         placeholder="One item per line"
@@ -286,7 +372,7 @@ export function WorkspaceWizardBlueprintEditor({
                 <SectionCard
                   surfaceTheme={surfaceTheme}
                   sectionId="workspace"
-                  highlighted={focus === "workspace"}
+                  highlighted={focusSection === "workspace"}
                   title="Workspace"
                   description="Provisioning path and bootstrap rules."
                   register={(node) => {
@@ -295,19 +381,39 @@ export function WorkspaceWizardBlueprintEditor({
                 >
                   <div className="grid gap-4 xl:grid-cols-2">
                     <FieldGroup label="Workspace name">
-                      <Input value={draft.workspaceName} onChange={(event) => updateDraft("workspaceName", event.target.value)} />
+                      <Input
+                        ref={registerField("workspace.name")}
+                        value={draft.workspaceName}
+                        onChange={(event) => updateDraft("workspaceName", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Workspace directory">
-                      <Input value={draft.workspaceDirectory} onChange={(event) => updateDraft("workspaceDirectory", event.target.value)} />
+                      <Input
+                        ref={registerField("workspace.directory")}
+                        value={draft.workspaceDirectory}
+                        onChange={(event) => updateDraft("workspaceDirectory", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Repository URL">
-                      <Input value={draft.workspaceRepoUrl} onChange={(event) => updateDraft("workspaceRepoUrl", event.target.value)} />
+                      <Input
+                        ref={registerField("workspace.repoUrl")}
+                        value={draft.workspaceRepoUrl}
+                        onChange={(event) => updateDraft("workspaceRepoUrl", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Existing folder path">
-                      <Input value={draft.workspaceExistingPath} onChange={(event) => updateDraft("workspaceExistingPath", event.target.value)} />
+                      <Input
+                        ref={registerField("workspace.existingPath")}
+                        value={draft.workspaceExistingPath}
+                        onChange={(event) => updateDraft("workspaceExistingPath", event.target.value)}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Model id">
-                      <Input value={draft.workspaceModelId} onChange={(event) => updateDraft("workspaceModelId", event.target.value)} />
+                      <Input
+                        ref={registerField("workspace.modelId")}
+                        value={draft.workspaceModelId}
+                        onChange={(event) => updateDraft("workspaceModelId", event.target.value)}
+                      />
                     </FieldGroup>
                   </div>
 
@@ -317,6 +423,8 @@ export function WorkspaceWizardBlueprintEditor({
                     value={draft.workspaceSourceMode}
                     options={WORKSPACE_SOURCE_OPTIONS}
                     onChange={(value) => updateDraft("workspaceSourceMode", value)}
+                    fieldRef={registerField("workspace.sourceMode")}
+                    highlighted={focusField === "workspace.sourceMode"}
                   />
 
                   <OptionSection
@@ -325,6 +433,8 @@ export function WorkspaceWizardBlueprintEditor({
                     value={draft.workspaceTemplate}
                     options={WORKSPACE_TEMPLATE_OPTIONS}
                     onChange={(value) => updateDraft("workspaceTemplate", value)}
+                    fieldRef={registerField("workspace.template")}
+                    highlighted={focusField === "workspace.template"}
                   />
 
                   <OptionSection
@@ -333,11 +443,14 @@ export function WorkspaceWizardBlueprintEditor({
                     value={draft.workspaceModelProfile}
                     options={WORKSPACE_MODEL_PROFILE_OPTIONS}
                     onChange={(value) => updateDraft("workspaceModelProfile", value)}
+                    fieldRef={registerField("workspace.modelProfile")}
+                    highlighted={focusField === "workspace.modelProfile"}
                   />
 
                   <div className="grid gap-4 xl:grid-cols-2">
                     <FieldGroup label="Stack decisions">
                       <Textarea
+                        ref={registerField("workspace.stackDecisions")}
                         value={draft.workspaceStackDecisions}
                         onChange={(event) => updateDraft("workspaceStackDecisions", event.target.value)}
                         placeholder="One item per line"
@@ -346,6 +459,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="Docs">
                       <Textarea
+                        ref={registerField("workspace.docs")}
                         value={draft.workspaceDocs}
                         onChange={(event) => updateDraft("workspaceDocs", event.target.value)}
                         placeholder="One item per line"
@@ -360,6 +474,8 @@ export function WorkspaceWizardBlueprintEditor({
                     description="Generate the first brief, architecture, and deliverables scaffold."
                     checked={draft.workspaceRuleGenerateStarterDocs}
                     onToggle={() => updateDraft("workspaceRuleGenerateStarterDocs", !draft.workspaceRuleGenerateStarterDocs)}
+                    fieldRef={registerField("workspace.ruleGenerateStarterDocs")}
+                    highlighted={focusField === "workspace.ruleGenerateStarterDocs"}
                   />
                   <RuleRow
                     surfaceTheme={surfaceTheme}
@@ -367,6 +483,8 @@ export function WorkspaceWizardBlueprintEditor({
                     description="Generate the persistent memory files for blueprint decisions."
                     checked={draft.workspaceRuleGenerateMemory}
                     onToggle={() => updateDraft("workspaceRuleGenerateMemory", !draft.workspaceRuleGenerateMemory)}
+                    fieldRef={registerField("workspace.ruleGenerateMemory")}
+                    highlighted={focusField === "workspace.ruleGenerateMemory"}
                   />
                   <RuleRow
                     surfaceTheme={surfaceTheme}
@@ -374,6 +492,8 @@ export function WorkspaceWizardBlueprintEditor({
                     description="Run the first mission immediately after bootstrap."
                     checked={draft.workspaceRuleKickoffMission}
                     onToggle={() => updateDraft("workspaceRuleKickoffMission", !draft.workspaceRuleKickoffMission)}
+                    fieldRef={registerField("workspace.ruleKickoffMission")}
+                    highlighted={focusField === "workspace.ruleKickoffMission"}
                   />
                 </SectionCard>
 
@@ -381,7 +501,7 @@ export function WorkspaceWizardBlueprintEditor({
                   <SectionCard
                     surfaceTheme={surfaceTheme}
                     sectionId="team"
-                    highlighted={focus === "team"}
+                    highlighted={focusSection === "team"}
                     title="Team"
                     description="Planner behavior and coordination rules."
                     register={(node) => {
@@ -394,6 +514,8 @@ export function WorkspaceWizardBlueprintEditor({
                       description="Let the planner spin up temporary helpers when useful."
                       checked={draft.teamAllowEphemeralSubagents}
                       onToggle={() => updateDraft("teamAllowEphemeralSubagents", !draft.teamAllowEphemeralSubagents)}
+                      fieldRef={registerField("team.allowEphemeralSubagents")}
+                      highlighted={focusField === "team.allowEphemeralSubagents"}
                     />
                     <RuleRow
                       surfaceTheme={surfaceTheme}
@@ -401,6 +523,8 @@ export function WorkspaceWizardBlueprintEditor({
                       description="Let the planner take a stronger lead when the shape is clear."
                       checked={draft.intakeAutopilot}
                       onToggle={() => updateDraft("intakeAutopilot", !draft.intakeAutopilot)}
+                      fieldRef={registerField("team.autopilot")}
+                      highlighted={focusField === "team.autopilot"}
                     />
                     <RuleRow
                       surfaceTheme={surfaceTheme}
@@ -408,9 +532,12 @@ export function WorkspaceWizardBlueprintEditor({
                       description="Keep the planner in a review-heavy shaping mode."
                       checked={draft.intakeReviewRequested}
                       onToggle={() => updateDraft("intakeReviewRequested", !draft.intakeReviewRequested)}
+                      fieldRef={registerField("team.reviewRequested")}
+                      highlighted={focusField === "team.reviewRequested"}
                     />
                     <FieldGroup label="Max parallel runs">
                       <Input
+                        ref={registerField("team.maxParallelRuns")}
                         type="number"
                         min={1}
                         value={draft.teamMaxParallelRuns}
@@ -419,6 +546,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="Escalation rules">
                       <Textarea
+                        ref={registerField("team.escalationRules")}
                         value={draft.teamEscalationRules}
                         onChange={(event) => updateDraft("teamEscalationRules", event.target.value)}
                         placeholder="One rule per line"
@@ -430,7 +558,7 @@ export function WorkspaceWizardBlueprintEditor({
                   <SectionCard
                     surfaceTheme={surfaceTheme}
                     sectionId="deploy"
-                    highlighted={focus === "deploy"}
+                    highlighted={focusSection === "deploy"}
                     title="Deploy"
                     description="Review blockers, warnings, and first missions."
                     register={(node) => {
@@ -439,6 +567,7 @@ export function WorkspaceWizardBlueprintEditor({
                   >
                     <FieldGroup label="Blockers">
                       <Textarea
+                        ref={registerField("deploy.blockers")}
                         value={draft.deployBlockers}
                         onChange={(event) => updateDraft("deployBlockers", event.target.value)}
                         placeholder="One blocker per line"
@@ -447,6 +576,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="Warnings">
                       <Textarea
+                        ref={registerField("deploy.warnings")}
                         value={draft.deployWarnings}
                         onChange={(event) => updateDraft("deployWarnings", event.target.value)}
                         placeholder="One warning per line"
@@ -455,6 +585,7 @@ export function WorkspaceWizardBlueprintEditor({
                     </FieldGroup>
                     <FieldGroup label="First missions">
                       <Textarea
+                        ref={registerField("deploy.firstMissions")}
                         value={draft.deployFirstMissions}
                         onChange={(event) => updateDraft("deployFirstMissions", event.target.value)}
                         placeholder="One mission per line"
@@ -716,7 +847,7 @@ function SectionCard({
   children
 }: {
   surfaceTheme: SurfaceTheme;
-  sectionId?: Exclude<WorkspaceBlueprintEditorFocus, "raw">;
+  sectionId?: WorkspaceBlueprintSectionFocus;
   highlighted?: boolean;
   title: string;
   description: string;
@@ -772,18 +903,33 @@ function OptionSection<T extends string>({
   label,
   value,
   options,
-  onChange
+  onChange,
+  fieldRef,
+  highlighted = false
 }: {
   surfaceTheme: SurfaceTheme;
   label: string;
   value: T;
   options: Array<{ value: T; label: string; description: string }>;
   onChange: (value: T) => void;
+  fieldRef?: (node: HTMLDivElement | null) => void;
+  highlighted?: boolean;
 }) {
   const isLight = surfaceTheme === "light";
 
   return (
-    <div className="space-y-2">
+    <div
+      ref={fieldRef}
+      tabIndex={-1}
+      className={cn(
+        "space-y-2 rounded-[18px] border p-3 transition-all",
+        isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]",
+        highlighted &&
+          (isLight
+            ? "ring-2 ring-[#d8b184]/60 shadow-[0_0_0_1px_rgba(216,177,132,0.12)]"
+            : "ring-2 ring-cyan-300/30 shadow-[0_0_0_1px_rgba(103,232,249,0.12)]")
+      )}
+    >
       <Label>{label}</Label>
       <div className="grid gap-2 md:grid-cols-2">
         {options.map((option) => {
@@ -827,13 +973,17 @@ function RuleRow({
   label,
   description,
   checked,
-  onToggle
+  onToggle,
+  fieldRef,
+  highlighted = false
 }: {
   surfaceTheme: SurfaceTheme;
   label: string;
   description: string;
   checked: boolean;
   onToggle: () => void;
+  fieldRef?: (node: HTMLButtonElement | null) => void;
+  highlighted?: boolean;
 }) {
   const isLight = surfaceTheme === "light";
 
@@ -841,6 +991,7 @@ function RuleRow({
     <button
       type="button"
       onClick={onToggle}
+      ref={fieldRef}
       className={cn(
         "w-full rounded-[16px] border px-3 py-3 text-left transition-colors",
         checked
@@ -849,7 +1000,11 @@ function RuleRow({
             : "border-cyan-300 bg-cyan-300/15 text-cyan-50"
           : isLight
             ? "border-[#e7dfd4] bg-[#faf6f1] text-[#171410] hover:border-[#d6cab9] hover:bg-[#f6efe6]"
-            : "border-white/10 bg-white/[0.03] text-slate-100 hover:border-white/15 hover:bg-white/[0.05]"
+            : "border-white/10 bg-white/[0.03] text-slate-100 hover:border-white/15 hover:bg-white/[0.05]",
+        highlighted &&
+          (isLight
+            ? "ring-2 ring-[#d8b184]/60 shadow-[0_0_0_1px_rgba(216,177,132,0.12)]"
+            : "ring-2 ring-cyan-300/30 shadow-[0_0_0_1px_rgba(103,232,249,0.12)]")
       )}
     >
       <div className="flex items-start justify-between gap-3">

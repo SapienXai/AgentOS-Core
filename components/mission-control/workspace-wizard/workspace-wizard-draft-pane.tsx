@@ -108,7 +108,7 @@ export function WorkspaceWizardDraftPane({
   const sectionRefs = useRef<Partial<Record<DraftSectionKey, HTMLDivElement | null>>>({});
   const previousSnapshotRef = useRef<TrackedDraftSnapshot | null>(null);
   const [activeSection, setActiveSection] = useState<DraftSectionKey | null>(null);
-  const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace") => {
+  const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace.name") => {
     onOpenBlueprintEditor?.(focus);
   };
   const trackedSnapshot = useMemo(
@@ -194,7 +194,7 @@ export function WorkspaceWizardDraftPane({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => openBlueprintEditor("workspace")}
+                  onClick={() => openBlueprintEditor("workspace.name")}
                   className={
                     isLight
                       ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
@@ -287,11 +287,11 @@ export function WorkspaceWizardDraftPane({
                     sectionRefs.current["architect-readout"] = node;
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => openBlueprintEditor("company")}
-                    className={cn(
-                      "w-full rounded-[22px] border p-4 text-left transition-colors",
+                <button
+                  type="button"
+                  onClick={() => openBlueprintEditor("company.mission")}
+                  className={cn(
+                    "w-full rounded-[22px] border p-4 text-left transition-colors",
                       isLight
                         ? "border-[#e5ddd2] bg-white hover:border-[#d9ccbf] hover:bg-[#fdfbf7]"
                         : "border-white/10 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.06]"
@@ -387,7 +387,7 @@ export function WorkspaceWizardDraftPane({
               }}>
                 <button
                   type="button"
-                  onClick={() => openBlueprintEditor("deploy")}
+                  onClick={() => openBlueprintEditor("deploy.blockers")}
                   className={cn(
                     "w-full rounded-[22px] border p-4 text-left transition-colors",
                     isLight
@@ -434,7 +434,19 @@ export function WorkspaceWizardDraftPane({
                   >
                     <button
                       type="button"
-                      onClick={() => openBlueprintEditor(section.id as WorkspaceBlueprintEditorFocus)}
+                      onClick={() =>
+                        openBlueprintEditor(
+                          section.id === "company"
+                            ? "company.mission"
+                            : section.id === "product"
+                              ? "product.offer"
+                              : section.id === "workspace"
+                                ? "workspace.name"
+                                : section.id === "team"
+                                  ? "team.maxParallelRuns"
+                                  : "deploy.blockers"
+                        )
+                      }
                       className={cn(
                         "w-full rounded-[22px] border p-4 text-left transition-colors",
                         isLight
@@ -474,7 +486,7 @@ export function WorkspaceWizardDraftPane({
               }}>
                 <button
                   type="button"
-                  onClick={() => openBlueprintEditor("deploy")}
+                  onClick={() => openBlueprintEditor("deploy.blockers")}
                   className={cn(
                     "w-full rounded-[22px] border p-4 text-left transition-colors",
                     isLight
@@ -777,21 +789,21 @@ function BasicSummaryCard({
               label="Name"
               value={resolvedName}
               icon={Sparkles}
-              onClick={() => onOpenBlueprintEditor?.("workspace")}
+              onClick={() => onOpenBlueprintEditor?.("workspace.name")}
             />
             <SummaryMetric
               surfaceTheme={surfaceTheme}
               label="Template"
               value={templateLabels[resolvedTemplate]}
               icon={Zap}
-              onClick={() => onOpenBlueprintEditor?.("workspace")}
+              onClick={() => onOpenBlueprintEditor?.("workspace.template")}
             />
             <SummaryMetric
               surfaceTheme={surfaceTheme}
               label="Source"
               value={sourceAnalysis.label}
               icon={sourceAnalysis.kind === "clone" ? GitBranch : sourceAnalysis.kind === "website" ? Globe : FolderOpen}
-              onClick={() => onOpenBlueprintEditor?.("workspace")}
+              onClick={() => onOpenBlueprintEditor?.("workspace.sourceMode")}
             />
             <SummaryMetric
               surfaceTheme={surfaceTheme}
@@ -800,7 +812,7 @@ function BasicSummaryCard({
               icon={FolderOpen}
               mono
               title={`Root: ${workspaceRoot}`}
-              onClick={() => onOpenBlueprintEditor?.("workspace")}
+              onClick={() => onOpenBlueprintEditor?.("workspace.directory")}
             />
           </div>
         </div>
@@ -945,7 +957,7 @@ function BasicSetupCard({
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => onOpenBlueprintEditor("workspace")}
+            onClick={() => onOpenBlueprintEditor("workspace.ruleGenerateStarterDocs")}
             className={
               isLight
                 ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
@@ -1092,7 +1104,7 @@ function SetupSpeedCard({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => onOpenBlueprintEditor("workspace")}
+              onClick={() => onOpenBlueprintEditor("workspace.ruleGenerateStarterDocs")}
               className={
                 isLight
                   ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"

@@ -142,7 +142,7 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
             <TimerReset className="h-3 w-3" />
           </div>
         ) : (
-          <div className="relative" ref={menuRef}>
+          <div className="nodrag nopan relative" ref={menuRef}>
             <button
               type="button"
               aria-label="Run actions"
@@ -151,14 +151,14 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
                 setMenuOpen((current) => !current);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+              className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
             >
               <MoreHorizontal className="h-3 w-3" />
             </button>
 
             {menuOpen ? (
               <div
-                className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+                className="nodrag nopan absolute right-0 top-[calc(100%+8px)] z-30 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
               >
@@ -231,7 +231,7 @@ function RuntimeMenuButton({
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[11px] text-slate-200 transition-colors hover:bg-white/[0.06] hover:text-white"
+      className="nodrag nopan flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[11px] text-slate-200 transition-colors hover:bg-white/[0.06] hover:text-white"
       onClick={onClick}
     >
       <Icon className="h-3.5 w-3.5 text-cyan-300" />

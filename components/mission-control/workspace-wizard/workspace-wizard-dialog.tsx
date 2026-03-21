@@ -102,7 +102,7 @@ export function WorkspaceWizardDialog({
   const [composerValue, setComposerValue] = useState("");
   const [isMobileBlueprintOpen, setIsMobileBlueprintOpen] = useState(false);
   const [isBlueprintEditorOpen, setIsBlueprintEditorOpen] = useState(false);
-  const [blueprintEditorFocus, setBlueprintEditorFocus] = useState<WorkspaceBlueprintEditorFocus>("workspace");
+  const [blueprintEditorFocus, setBlueprintEditorFocus] = useState<WorkspaceBlueprintEditorFocus>("workspace.name");
   const isLight = surfaceTheme === "light";
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -110,7 +110,7 @@ export function WorkspaceWizardDialog({
       setComposerValue("");
       setIsMobileBlueprintOpen(false);
       setIsBlueprintEditorOpen(false);
-      setBlueprintEditorFocus("workspace");
+      setBlueprintEditorFocus("workspace.name");
     }
 
     onOpenChange(nextOpen);
@@ -228,7 +228,7 @@ export function WorkspaceWizardDialog({
     return wizard.savePlan(planWithNote);
   };
 
-  const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace") => {
+  const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace.name") => {
     setBlueprintEditorFocus(focus);
     setIsMobileBlueprintOpen(false);
     setIsBlueprintEditorOpen(true);

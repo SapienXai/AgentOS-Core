@@ -106,7 +106,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           </p>
         </div>
 
-        <div className="relative" ref={menuRef}>
+        <div className="nodrag nopan relative" ref={menuRef}>
           <button
             type="button"
             aria-label={`${data.agent.name} actions`}
@@ -115,7 +115,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
               setMenuOpen((current) => !current);
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -165,7 +165,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           type="button"
           aria-expanded={expanded}
           aria-controls={detailsPanelId}
-          className="group flex w-full items-start justify-between gap-3 rounded-[14px] border border-transparent px-1 py-1.5 text-left transition-colors hover:border-white/[0.06] hover:bg-white/[0.02]"
+          className="nodrag nopan group flex w-full items-start justify-between gap-3 rounded-[14px] border border-transparent px-1 py-1.5 text-left transition-colors hover:border-white/[0.06] hover:bg-white/[0.02]"
           onClick={(event) => {
             event.stopPropagation();
             setExpanded((current) => !current);
@@ -191,7 +191,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden nowheel"
+            className="nodrag nopan overflow-hidden nowheel"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="pt-2.5">
@@ -299,7 +299,7 @@ function AgentMenuButton({
     <button
       type="button"
       className={cn(
-        "flex w-full items-center rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
+        "nodrag nopan flex w-full items-center rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
         danger
           ? "text-rose-200 hover:bg-rose-400/10 hover:text-rose-100"
           : "text-slate-200 hover:bg-white/[0.06] hover:text-white"

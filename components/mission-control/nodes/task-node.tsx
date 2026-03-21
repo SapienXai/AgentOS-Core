@@ -166,7 +166,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           </p>
         </div>
 
-        <div className="relative" ref={menuRef}>
+        <div className="nodrag nopan relative" ref={menuRef}>
           <button
             type="button"
             aria-label="Task actions"
@@ -175,14 +175,14 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
               setMenuOpen((current) => !current);
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
           >
             <MoreHorizontal className="h-3 w-3" />
           </button>
 
           {menuOpen ? (
             <div
-              className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[148px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+              className="nodrag nopan absolute right-0 top-[calc(100%+8px)] z-30 min-w-[148px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
             >
@@ -295,7 +295,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           type="button"
           aria-expanded={expanded}
           aria-controls={feedPanelId}
-          className="group flex w-full items-start justify-between gap-3 rounded-[14px] border border-transparent px-1 py-1.5 text-left transition-colors hover:border-white/[0.06] hover:bg-white/[0.02]"
+          className="nodrag nopan group flex w-full items-start justify-between gap-3 rounded-[14px] border border-transparent px-1 py-1.5 text-left transition-colors hover:border-white/[0.06] hover:bg-white/[0.02]"
           onClick={(event) => {
             event.stopPropagation();
             setExpanded((current) => !current);
@@ -321,7 +321,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden nowheel"
+            className="nodrag nopan overflow-hidden nowheel"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="pt-2.5">
@@ -474,7 +474,7 @@ function TaskQuickAction({
     <button
       type="button"
       className={cn(
-        "flex min-h-[38px] w-full items-center justify-between rounded-[12px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-2.5 py-1.5 text-left transition-colors hover:border-cyan-300/20 hover:bg-cyan-400/[0.06]",
+        "nodrag nopan flex min-h-[38px] w-full items-center justify-between rounded-[12px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-2.5 py-1.5 text-left transition-colors hover:border-cyan-300/20 hover:bg-cyan-400/[0.06]",
         active && "border-cyan-300/30 bg-cyan-400/[0.08]"
       )}
       onClick={(event) => {
@@ -554,7 +554,7 @@ function TaskMenuButton({
       type="button"
       disabled={disabled}
       className={cn(
-        "flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
+        "nodrag nopan flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
         disabled
           ? "cursor-not-allowed text-slate-500"
           : destructive

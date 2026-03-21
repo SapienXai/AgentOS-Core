@@ -207,11 +207,20 @@ export function MissionCanvas({
 
   useEffect(() => {
     setNodes((previousNodes) =>
-      previousNodes.map((node) => ({
-        ...node,
-        selected: node.id === selectedNodeId,
-        zIndex: resolveNodeZIndex(node, selectedNodeId)
-      }))
+      previousNodes.map((node) => {
+        const nextSelected = node.id === selectedNodeId;
+        const nextZIndex = resolveNodeZIndex(node, selectedNodeId);
+
+        if (Boolean(node.selected) === nextSelected && node.zIndex === nextZIndex) {
+          return node;
+        }
+
+        return {
+          ...node,
+          selected: nextSelected,
+          zIndex: nextZIndex
+        };
+      })
     );
   }, [selectedNodeId, setNodes]);
 
@@ -572,11 +581,18 @@ function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]
       return node;
     }
 
+    const selected = previous.selected ?? node.selected;
+    const zIndex = previous.selected ? previous.zIndex : node.zIndex;
+
     return {
       ...node,
       position: previous.position,
-      width: previous.width,
-      height: previous.height
+      width: previous.width ?? node.width,
+      height: previous.height ?? node.height,
+      measured: previous.measured ?? node.measured,
+      dragging: previous.dragging ?? node.dragging,
+      selected,
+      zIndex
     };
   });
 }
