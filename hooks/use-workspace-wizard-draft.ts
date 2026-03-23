@@ -32,6 +32,7 @@ import {
   inferWorkspaceWizardQuickSetupPreset,
   type WorkspaceWizardQuickSetupPreset
 } from "@/lib/openclaw/workspace-wizard-mappers";
+import { buildWorkspaceScaffoldDocuments } from "@/lib/openclaw/workspace-docs";
 import {
   analyzeWorkspaceWizardSourceInput,
   createInitialWorkspaceWizardBasicDraft,
@@ -77,6 +78,7 @@ export function useWorkspaceWizardDraft({
   const [isSimulating, setIsSimulating] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isDocumentRewriting, setIsDocumentRewriting] = useState(false);
   const [deployProgress, setDeployProgress] = useState<OperationProgressSnapshot | null>(null);
   const [createProgress, setCreateProgress] = useState<OperationProgressSnapshot | null>(null);
   const [sendProgressStep, setSendProgressStep] = useState(0);
@@ -95,10 +97,10 @@ export function useWorkspaceWizardDraft({
   const architectBusyStatus = useMemo(
     () => getPlannerBusyStatus({
       initialTurn: !plan?.intake.started,
-      step: sendProgressStep,
-      active: isSending
+      step: isSending ? sendProgressStep : 0,
+      active: isSending || isDocumentRewriting
     }),
-    [isSending, plan?.intake.started, sendProgressStep]
+    [isDocumentRewriting, isSending, plan?.intake.started, sendProgressStep]
   );
 
   const commitPlan = useCallback(
@@ -242,6 +244,7 @@ export function useWorkspaceWizardDraft({
     setIsSimulating(false);
     setIsDeploying(false);
     setIsCreating(false);
+    setIsDocumentRewriting(false);
     setPendingUserMessage(null);
     planRequestRef.current = null;
 
@@ -602,6 +605,78 @@ export function useWorkspaceWizardDraft({
     [basicDraft, commitPlan, ensurePlan, initialMode, plan]
   );
 
+  const rewriteDocumentWithArchitect = useCallback(
+    async ({
+      path,
+      currentContent,
+      instruction
+    }: {
+      path: string;
+      currentContent: string;
+      instruction?: string;
+    }): Promise<string | null> => {
+      const activePlan = plan;
+
+      if (!activePlan || !planId) {
+        return null;
+      }
+
+      const trimmedPath = path.trim();
+      if (!trimmedPath) {
+        return null;
+      }
+
+      setIsDocumentRewriting(true);
+
+      try {
+        const response = await fetch(`/api/planner/${planId}/document-rewrite`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            plan: activePlan,
+            path: trimmedPath,
+            currentContent,
+            instruction: instruction?.trim() || "Rewrite this document to improve clarity, usefulness, and consistency with the workspace context."
+          })
+        });
+        const result = (await response.json()) as { plan?: WorkspacePlan; reply?: string; error?: string };
+
+        if (!response.ok || !result.plan) {
+          throw new Error(result.error || "Unable to rewrite the document.");
+        }
+
+        commitPlan(result.plan);
+        setNotice(null);
+        const rewrittenDocuments = buildWorkspaceScaffoldDocuments({
+          name: result.plan.workspace.name || "Workspace",
+          brief: result.plan.company.mission || result.plan.product.offer || undefined,
+          template: result.plan.workspace.template,
+          sourceMode: result.plan.workspace.sourceMode,
+          rules: result.plan.workspace.rules,
+          agents: result.plan.team.persistentAgents.filter((agent) => agent.enabled),
+          docOverrides: result.plan.workspace.docOverrides,
+          toolExamples: []
+        });
+        const rewrittenDocument = rewrittenDocuments.find((entry) => entry.path === trimmedPath);
+
+        toast.success(`Architect rewrote ${trimmedPath}.`, {
+          description: result.reply || "The document override has been updated."
+        });
+        return rewrittenDocument?.content ?? null;
+      } catch (error) {
+        toast.error("Document rewrite failed.", {
+          description: error instanceof Error ? error.message : "Unknown document rewrite error."
+        });
+        return null;
+      } finally {
+        setIsDocumentRewriting(false);
+      }
+    },
+    [commitPlan, plan, planId]
+  );
+
   const resumeStoredDraft = useCallback(async () => {
     const storedPlanId = getStoredPlanId();
 
@@ -790,6 +865,7 @@ export function useWorkspaceWizardDraft({
       setNotice(null);
       setCreateProgress(null);
       setDeployProgress(null);
+      setIsDocumentRewriting(false);
       setPendingUserMessage(null);
       planRequestRef.current = null;
       return;
@@ -800,10 +876,11 @@ export function useWorkspaceWizardDraft({
     setMode(initialMode);
     setHasStoredDraft(Boolean(storedPlanId));
     setBasicDraft(createInitialWorkspaceWizardBasicDraft());
-      setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
+    setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
     setNotice(null);
     setCreateProgress(null);
     setDeployProgress(null);
+    setIsDocumentRewriting(false);
     setPendingUserMessage(null);
     planRequestRef.current = null;
 
@@ -859,6 +936,7 @@ export function useWorkspaceWizardDraft({
     isSimulating,
     isDeploying,
     isCreating,
+    isDocumentRewriting,
     createProgress,
     deployProgress,
     architectBusyStatus,
@@ -879,7 +957,8 @@ export function useWorkspaceWizardDraft({
     requestReview,
     createWorkspace,
     deployPlan,
-    submitArchitectTurn
+    submitArchitectTurn,
+    rewriteDocumentWithArchitect
   };
 }
 

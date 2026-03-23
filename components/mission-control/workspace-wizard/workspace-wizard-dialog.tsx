@@ -158,7 +158,12 @@ export function WorkspaceWizardDialog({
   }, [wizard.mode, wizard.plan?.intake.started, wizard.plan?.intake.suggestedReplies]);
 
   const activeProgress = wizard.isCreating ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null;
-  const isArchitectBusy = wizard.isSending || wizard.isPlanLoading || wizard.isDeploying || wizard.isCreating;
+  const isArchitectBusy =
+    wizard.isSending ||
+    wizard.isPlanLoading ||
+    wizard.isDeploying ||
+    wizard.isCreating ||
+    wizard.isDocumentRewriting;
   const showResumeBanner = wizard.mode === "basic" && wizard.hasStoredDraft && !wizard.plan && !wizard.isPlanLoading;
   const hasDraftToCreate = Boolean(
     wizard.plan?.intake.started || wizard.basicDraft.goal.trim() || composerValue.trim()
@@ -552,8 +557,10 @@ export function WorkspaceWizardDialog({
               plan={wizard.plan}
               path={documentEditorPath}
               busy={wizard.isSaving}
+              rewriteBusy={wizard.isDocumentRewriting}
               onClose={() => setIsDocumentEditorOpen(false)}
               onSave={handleDocumentEditorSave}
+              onRewriteWithArchitect={wizard.rewriteDocumentWithArchitect}
             />
           ) : null}
 

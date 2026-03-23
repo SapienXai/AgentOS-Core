@@ -30,6 +30,11 @@ import {
   synthesizePlannerAdvisors
 } from "@/lib/openclaw/planner-core";
 import {
+  buildWorkspaceScaffoldDocuments,
+  normalizeWorkspaceDocOverrides,
+  type WorkspaceScaffoldDocument
+} from "@/lib/openclaw/workspace-docs";
+import {
   createAgent,
   createWorkspaceProject,
   getMissionControlSnapshot,
@@ -47,6 +52,7 @@ import type {
   PlannerPersistentAgentSpec,
   PlannerSandboxSpec,
   PlannerWorkflowSpec,
+  WorkspaceDocOverride,
   WorkspaceTemplate,
   WorkspaceAgentBlueprintInput,
   WorkspaceCreateInput,
@@ -181,7 +187,9 @@ type PlannerAgentTurnPayload = {
 type PlannerAgentPatch = {
   company?: Partial<WorkspacePlan["company"]>;
   product?: Partial<WorkspacePlan["product"]>;
-  workspace?: Partial<WorkspacePlan["workspace"]>;
+  workspace?: Partial<WorkspacePlan["workspace"]> & {
+    removeDocOverridePaths?: string[];
+  };
   team?: {
     removeAgentIds?: string[];
     persistentAgents?: Array<Partial<PlannerPersistentAgentSpec> & { id: string }>;
@@ -220,6 +228,11 @@ type PlannerAdvisorAgentResponse = {
 
 type WorkspacePlanTurnResult = {
   plan: WorkspacePlan;
+};
+
+type WorkspaceDocumentRewriteResult = {
+  plan: WorkspacePlan;
+  reply: string;
 };
 
 export async function createWorkspacePlan() {
@@ -296,6 +309,49 @@ export async function submitWorkspacePlanTurn(
 
   return {
     plan: nextPlan
+  };
+}
+
+export async function submitWorkspaceDocumentRewrite(
+  planId: string,
+  input: {
+    path: string;
+    instruction?: string;
+    currentContent?: string;
+    plan?: WorkspacePlan;
+  }
+): Promise<WorkspaceDocumentRewriteResult> {
+  const trimmedPath = input.path.trim();
+
+  if (!trimmedPath) {
+    throw new Error("Document path is required.");
+  }
+
+  const basePlan = input.plan
+    ? await persistIncomingPlan(planId, input.plan)
+    : await readWorkspacePlan(planId);
+  const runtimeReadyPlan = await ensurePlannerRuntime(enrichWorkspacePlan(basePlan));
+  const rewriteInstruction =
+    input.instruction?.trim() ||
+    "Rewrite this document to improve clarity, usefulness, and consistency with the workspace context.";
+  const rewriteResult = await runWorkspaceDocumentRewriteTurn(
+    runtimeReadyPlan,
+    trimmedPath,
+    input.currentContent,
+    rewriteInstruction
+  );
+
+  let nextPlan = rewriteResult.plan;
+  nextPlan.conversation.push(
+    createPlannerMessage("assistant", "Workspace Architect", rewriteResult.reply)
+  );
+  nextPlan = enrichWorkspacePlan(nextPlan);
+
+  await saveWorkspacePlan(nextPlan);
+
+  return {
+    plan: nextPlan,
+    reply: rewriteResult.reply
   };
 }
 
@@ -629,6 +685,7 @@ You are the primary planning agent for Mission Control.
 - Example: if the operator says "şahsi asistan ekleyelim" or "add a personal assistant", add a persistent agent like { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant", ... }.
 - Infer likely defaults and say what you assumed instead of bouncing the decision back by default.
 - Give proactive suggestions when you see a stronger workspace shape, cleaner V1, or better agent split.
+- If the operator asks to rewrite a generated document, update workspace.docOverrides for that document path and keep unrelated plan sections unchanged.
 - Use patch as the source of truth. The planner layer should validate the draft, not force the operator to restate it.
 - When a domain or website implies a likely brand name, use it unless contradicted.
 - If a section must be removed in a revision, use the relevant removeIds list for agents, workflows, channels, automations, or hooks.
@@ -953,6 +1010,73 @@ async function runArchitectPlannerTurn(
   }
 }
 
+async function runWorkspaceDocumentRewriteTurn(
+  plan: WorkspacePlan,
+  targetPath: string,
+  currentContent: string | undefined,
+  instruction: string
+): Promise<WorkspaceDocumentRewriteResult> {
+  const targetDocument = resolveWorkspaceScaffoldDocumentForRewrite(plan, targetPath, currentContent);
+
+  if (!targetDocument) {
+    throw new Error(`Document ${targetPath} is not available in this workspace scaffold.`);
+  }
+
+  const result = await runPlannerRuntimeAgent<PlannerArchitectAgentResponse>({
+    agentId: plan.runtime.architectAgentId ?? buildPlannerRuntimeAgentId("architect"),
+    sessionId: plan.runtime.architectSessionId ?? plan.id,
+    message: buildPlannerDocumentRewritePrompt(plan, targetDocument, instruction),
+    thinking: resolveArchitectThinking(plan)
+  });
+
+  const workspacePatch = result.response.patch?.workspace;
+  const targetDocOverrides = normalizeWorkspaceDocOverrides(
+    workspacePatch?.docOverrides?.filter((entry) => entry.path.trim() === targetPath)
+  );
+  const targetRemovals = (workspacePatch?.removeDocOverridePaths ?? [])
+    .map((entry) => entry.trim())
+    .filter((entry) => entry === targetPath);
+
+  if (
+    targetDocOverrides.length === 0 &&
+    targetRemovals.length === 0
+  ) {
+    throw new Error(`Architect did not return a rewrite patch for ${targetPath}.`);
+  }
+
+  let nextPlan = structuredClone(plan);
+  nextPlan = applyPlannerAgentPatch(nextPlan, {
+    workspace: {
+      docOverrides: targetDocOverrides,
+      removeDocOverridePaths: targetRemovals
+    }
+  });
+  nextPlan.runtime = createPlannerRuntimeState(nextPlan.id, {
+    ...nextPlan.runtime,
+    mode: "agent",
+    status: "ready",
+    lastArchitectRunId: result.runId,
+    lastError: undefined
+  });
+
+  const rewrittenDocument = resolveWorkspaceScaffoldDocumentForRewrite(nextPlan, targetPath);
+
+  if (!rewrittenDocument) {
+    throw new Error(`Architect could not resolve ${targetPath} after the rewrite patch.`);
+  }
+
+  const fallbackReply = `Updated ${targetPath}.`;
+
+  return {
+    plan: nextPlan,
+    reply: formatArchitectAgentReply(
+      result.response,
+      fallbackReply,
+      resolvePlannerReplyLanguage(nextPlan, instruction)
+    )
+  };
+}
+
 async function runPlannerRuntimeAgent<T>({
   agentId,
   sessionId,
@@ -1014,7 +1138,8 @@ function buildPlannerArchitectPrompt(
     "- If the message includes a proper noun tied to the project, workspace, or brand, treat it as a valid name candidate unless contradicted.",
     "- If the site title or domain is ambiguous or generic, make the best assumption and keep it in the assumptions list instead of stopping the draft.",
     "- Do not invent workflows, automations, channels, or a large agent roster without evidence, but draft the smallest coherent set that supports the brief.",
-    "- Keep reply concise, concrete, and operator-facing.",
+    "- Keep the reply to one short sentence when possible.",
+    "- Do not repeat the full draft, and do not put assumptions, suggestions, or questions into the reply text.",
     "- Reply in the same language as the operator's latest message.",
     "- If the operator switches languages, follow the latest message only. Do not stick to an older language from earlier turns.",
     "- Treat colloquial Turkish and informal phrasing as first-class input. Infer names, roles, and intent from natural speech instead of waiting for rigid formatting.",
@@ -1022,6 +1147,7 @@ function buildPlannerArchitectPrompt(
     "- Take initiative. If the intent is clear but some details are ambiguous, choose the likeliest workable default and tell the operator what you assumed.",
     "- If the operator asks for a role or agent in plain language, add or adapt a persistent agent for that role instead of asking them to restate it formally.",
     '- Example: "şahsi asistan ekleyelim" should produce a persistent agent patch such as { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant" } with a sensible purpose and outputs.',
+    "- If the operator explicitly asks to revise a generated document, put the full revised text in workspace.docOverrides for that document path and keep unrelated plan sections unchanged.",
     "- Give recommendations proactively when you see a stronger default, clearer role split, or cleaner V1 path, but prefer a complete draft over a sparse one.",
     "- When a domain implies a likely brand name, use it unless contradicted.",
     "- When you still need confirmation after reading a source, state what you inferred first and ask only for the remaining ambiguity.",
@@ -1067,6 +1193,60 @@ function buildPlannerArchitectPrompt(
   ].join("\n");
 }
 
+function buildPlannerDocumentRewritePrompt(
+  plan: WorkspacePlan,
+  targetDocument: WorkspaceScaffoldDocument,
+  instruction: string
+) {
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+
+  return [
+    "You are Workspace Architect, rewriting one generated workspace document.",
+    "Return valid JSON only. Do not wrap the JSON in markdown fences.",
+    'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":boolean,"assumptions":["..."],"suggestions":["..."],"questions":["..."],"patch":{}}',
+    "Rules:",
+    "- Rewrite only the requested document unless the instruction explicitly asks for a broader plan change.",
+    "- Treat the provided currentContent as the source of truth for the rewrite.",
+    "- Update only workspace.docOverrides for the target path. If the best revision is to restore the generated default scaffold, remove the override for that path.",
+    "- Do not change unrelated company, product, team, or operations fields in this document rewrite flow.",
+    "- Keep the reply to one short sentence and mention only what changed.",
+    "- Reply in the same language as the operator instruction.",
+    "",
+    "Context JSON:",
+    JSON.stringify(
+      {
+        operatorInstruction: instruction,
+        targetDocument: {
+          path: targetDocument.path,
+          title: targetDocument.title,
+          description: targetDocument.description,
+          category: targetDocument.category,
+          baseContent: targetDocument.baseContent,
+          currentContent: targetDocument.content
+        },
+        selectedWorkspaceSize: {
+          id: plan.intake.size,
+          label: sizeProfile.label,
+          targets: {
+            agents: sizeProfile.agentCount,
+            tasks: sizeProfile.workflowCount,
+            automations: sizeProfile.automationCount,
+            externalChannels: sizeProfile.externalChannelCount
+          }
+        },
+        currentPlan: createPlannerPromptContext(plan),
+        recentConversation: plan.conversation.slice(-6).map((entry) => ({
+          role: entry.role,
+          author: entry.author,
+          text: entry.text
+        }))
+      },
+      null,
+      2
+    )
+  ].join("\n");
+}
+
 function buildPlannerAdvisorPrompt(
   plan: WorkspacePlan,
   advisorId: PlannerAdvisorId,
@@ -1101,26 +1281,33 @@ function formatArchitectAgentReply(
   fallbackReply: string,
   expectedLanguage: "en" | "tr"
 ) {
-  const replyLanguage = detectPlannerTextLanguage(response.reply);
-  if (replyLanguage && replyLanguage !== expectedLanguage) {
-    return fallbackReply;
+  const reply = response.reply?.trim();
+  if (!reply) {
+    return compactArchitectReply(fallbackReply);
   }
 
-  const isTurkish = expectedLanguage === "tr";
-  const sections = [
-    response.reply?.trim(),
-    response.assumptions?.length
-      ? `${isTurkish ? "Varsayımlar" : "Assumptions"}: ${uniqueStrings(response.assumptions).slice(0, 2).join(" | ")}`
-      : "",
-    response.suggestions?.length
-      ? `${isTurkish ? "Öneriler" : "Suggestions"}: ${uniqueStrings(response.suggestions).slice(0, 2).join(" | ")}`
-      : "",
-    response.questions?.length
-      ? `${isTurkish ? "Sıradaki karar" : "Next decision"}: ${uniqueStrings(response.questions).slice(0, 1).join(" | ")}`
-      : ""
-  ].filter(Boolean);
+  const replyLanguage = detectPlannerTextLanguage(reply);
+  if (replyLanguage && replyLanguage !== expectedLanguage) {
+    return compactArchitectReply(fallbackReply);
+  }
 
-  return sections.join("\n\n") || fallbackReply;
+  return compactArchitectReply(reply);
+}
+
+function compactArchitectReply(reply: string) {
+  const normalized = reply.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "";
+  }
+
+  const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const compact = sentences.length > 1 ? sentences.slice(0, 2).join(" ") : normalized;
+
+  if (compact.length <= 220) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 217).trimEnd()}...`;
 }
 
 function shouldUseLocalPlannerFastPath(plan: WorkspacePlan) {
@@ -1236,6 +1423,14 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
       nextWorkspace.repoUrl = undefined;
     }
 
+    if (patch.workspace.docOverrides || patch.workspace.removeDocOverridePaths?.length) {
+      nextWorkspace.docOverrides = mergePlannerDocOverrides(
+        nextPlan.workspace.docOverrides,
+        patch.workspace.docOverrides,
+        patch.workspace.removeDocOverridePaths
+      );
+    }
+
     nextPlan.workspace = nextWorkspace;
   }
 
@@ -1294,6 +1489,70 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
   }
 
   return enrichWorkspacePlan(nextPlan);
+}
+
+function mergePlannerDocOverrides(
+  current: WorkspaceDocOverride[],
+  incoming?: WorkspaceDocOverride[],
+  removePaths?: string[]
+) {
+  const merged = new Map<string, string>();
+
+  for (const entry of normalizeWorkspaceDocOverrides(current)) {
+    merged.set(entry.path, entry.content);
+  }
+
+  for (const removePath of removePaths ?? []) {
+    const path = removePath.trim();
+    if (!path) {
+      continue;
+    }
+
+    merged.delete(path);
+  }
+
+  for (const entry of normalizeWorkspaceDocOverrides(incoming)) {
+    merged.set(entry.path, entry.content);
+  }
+
+  return normalizeWorkspaceDocOverrides(
+    Array.from(merged.entries()).map(([path, content]) => ({
+      path,
+      content
+    }))
+  );
+}
+
+function resolveWorkspaceScaffoldDocumentForRewrite(
+  plan: WorkspacePlan,
+  targetPath: string,
+  currentContent?: string
+) {
+  const documents = buildWorkspaceScaffoldDocuments({
+    name: plan.workspace.name || "Workspace",
+    brief: plan.company.mission || plan.product.offer || undefined,
+    template: plan.workspace.template,
+    sourceMode: plan.workspace.sourceMode,
+    rules: plan.workspace.rules,
+    agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
+    docOverrides: plan.workspace.docOverrides,
+    toolExamples: []
+  });
+
+  const document = documents.find((entry) => entry.path === targetPath);
+
+  if (!document) {
+    return null;
+  }
+
+  if (typeof currentContent === "string") {
+    return {
+      ...document,
+      content: currentContent
+    };
+  }
+
+  return document;
 }
 
 function removePlannerEntries<T extends { id: string }>(current: T[], removeIds: string[]) {

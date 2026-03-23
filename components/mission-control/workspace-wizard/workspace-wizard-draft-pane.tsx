@@ -36,6 +36,7 @@ import type {
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
 import { buildWorkspaceScaffoldPreview, WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
+import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import type { WorkspaceWizardQuickSetupPreset } from "@/lib/openclaw/workspace-wizard-mappers";
 import type { WorkspaceWizardSourceAnalysis } from "@/lib/openclaw/workspace-wizard-inference";
 import { cn } from "@/lib/utils";
@@ -949,6 +950,10 @@ function BasicSetupCard({
   const isLight = surfaceTheme === "light";
   const toggleItems = buildBasicSetupToggleItems(template, rules);
   const filePreview = buildWorkspaceScaffoldPreview(template, rules);
+  const overriddenFilePaths = useMemo(
+    () => new Set(normalizeWorkspaceDocOverrides(plan?.workspace.docOverrides).map((entry) => entry.path)),
+    [plan?.workspace.docOverrides]
+  );
   const hasPlan = Boolean(plan);
   const presetSummary =
     preset === "fastest"
@@ -1064,11 +1069,12 @@ function BasicSetupCard({
               key={file}
               surfaceTheme={surfaceTheme}
               label={file}
+              tone={overriddenFilePaths.has(file) ? "success" : "default"}
               interactive={Boolean(hasPlan && onOpenDocumentEditor)}
               onClick={hasPlan && onOpenDocumentEditor ? () => onOpenDocumentEditor(file) : undefined}
             />
           ))}
-          {rules.kickoffMission ? <FileToken surfaceTheme={surfaceTheme} label="Kickoff mission" accent /> : null}
+          {rules.kickoffMission ? <FileToken surfaceTheme={surfaceTheme} label="Kickoff mission" tone="accent" /> : null}
         </div>
         {hasPlan && onOpenDocumentEditor ? (
           <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
@@ -1209,29 +1215,40 @@ function PresetButton({
 function FileToken({
   surfaceTheme,
   label,
-  accent = false,
+  tone = "default",
   interactive = false,
   onClick
 }: {
   surfaceTheme: SurfaceTheme;
   label: string;
-  accent?: boolean;
+  tone?: "default" | "accent" | "success";
   interactive?: boolean;
   onClick?: () => void;
 }) {
-  const className = cn(
-    "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[10px] transition-colors",
-    accent
+  const toneClassName =
+    tone === "accent"
       ? surfaceTheme === "light"
         ? "border-[#d8b184] bg-[#f8efe3] text-[#7c5a34]"
         : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
-      : surfaceTheme === "light"
-        ? "border-[#e4ddd3] bg-white text-[#6c645b]"
-        : "border-white/10 bg-white/[0.05] text-slate-300",
+      : tone === "success"
+        ? surfaceTheme === "light"
+          ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+          : "border-emerald-300/30 bg-emerald-300/12 text-emerald-100"
+        : surfaceTheme === "light"
+          ? "border-[#e4ddd3] bg-white text-[#6c645b]"
+          : "border-white/10 bg-white/[0.05] text-slate-300";
+
+  const className = cn(
+    "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[10px] transition-colors",
+    toneClassName,
     interactive
-      ? surfaceTheme === "light"
-        ? "cursor-pointer hover:border-[#d8c8ba] hover:bg-[#f6efe6]"
-        : "cursor-pointer hover:border-white/15 hover:bg-white/[0.08]"
+      ? tone === "success"
+        ? surfaceTheme === "light"
+          ? "cursor-pointer hover:border-emerald-400 hover:bg-emerald-100"
+          : "cursor-pointer hover:border-emerald-300/45 hover:bg-emerald-300/16"
+        : surfaceTheme === "light"
+          ? "cursor-pointer hover:border-[#d8c8ba] hover:bg-[#f6efe6]"
+          : "cursor-pointer hover:border-white/15 hover:bg-white/[0.08]"
       : ""
   );
 

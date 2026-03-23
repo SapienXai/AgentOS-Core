@@ -1493,14 +1493,15 @@ function buildArchitectSummary(
   reviewMode: boolean
 ) {
   const language = resolvePlannerReplyLanguage(plan);
-  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
   const isDialogueFirstTurn = isPlannerDialogueFirstTurn(plan);
   const lowConfidenceWebsiteSource = getPlannerLowConfidenceWebsiteSource(plan);
+  const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled).length;
+  const enabledWorkflows = plan.operations.workflows.filter((workflow) => workflow.enabled).length;
+  const enabledAutomations = plan.operations.automations.filter((automation) => automation.enabled).length;
+  const confirmations = plan.intake.confirmations.length;
 
   if (!plan.intake.started) {
-    return language === "tr"
-      ? `Tek bir mesajla başla. ${sizeProfile.label} modunda sohbet yalın kalır; Architect ise arka planda proje bağlamını toplar, full bir workspace taslağı çıkarır ve revizyonları kabul eder.`
-      : `Start with one prompt. ${sizeProfile.label} mode keeps the chat lean while the architect still harvests project context, drafts a full workspace, and accepts revisions.`;
+    return language === "tr" ? "Tek mesajla başla." : "Start with one prompt.";
   }
 
   if (!reviewMode && isDialogueFirstTurn) {
@@ -1508,11 +1509,11 @@ function buildArchitectSummary(
     const sourceDescription =
       plan.workspace.sourceMode === "clone"
         ? language === "tr"
-          ? "klonlanacak bir repo"
-          : "a cloned repository"
+          ? "klon repo"
+          : "a cloned repo"
         : plan.workspace.sourceMode === "existing"
           ? language === "tr"
-            ? "mevcut bir klasör"
+            ? "mevcut klasör"
             : "an existing folder"
           : language === "tr"
             ? "sıfırdan"
@@ -1520,96 +1521,87 @@ function buildArchitectSummary(
     const nameNote =
       lowConfidenceWebsiteSource && !plan.company.name && !plan.workspace.name
         ? language === "tr"
-          ? `Site adını ${lowConfidenceWebsiteSource.label} olarak geçici varsayım kabul ettim.`
-          : `I treated the site name as ${lowConfidenceWebsiteSource.label} for now.`
+          ? `Site adı için ${lowConfidenceWebsiteSource.label} varsayımını kullandım.`
+          : `I used ${lowConfidenceWebsiteSource.label} as the site name.`
         : "";
 
     return language === "tr"
-      ? [nameNote, focus
-          ? `İlk mesajı ${focus} etrafında ve ${sourceDescription} başlangıcıyla okudum. Tam bir ilk taslak oluşturdum ve istediğin kadar revize edebiliriz.`
-          : `İlk mesajı ${sourceDescription} başlangıcıyla okudum. Tam bir ilk taslak oluşturdum ve istediğin kadar revize edebiliriz.`]
+      ? [nameNote, focus ? `İlk taslak ${focus} etrafında hazır.` : `İlk taslak ${sourceDescription} başlangıcıyla hazır.`]
           .filter(Boolean)
           .join(" ")
-      : [nameNote, `I read the first message as a ${prettify(plan.workspace.template).toLowerCase()} workspace${focus ? ` around ${focus}` : ""}, starting from ${sourceDescription}. I drafted a full first pass and we can revise it as many times as you want.`]
+      : [nameNote, focus ? `First pass ready around ${focus}.` : `First pass ready from ${sourceDescription}.`]
           .filter(Boolean)
           .join(" ");
   }
-
-  const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled).length;
-  const enabledWorkflows = plan.operations.workflows.filter((workflow) => workflow.enabled).length;
-  const enabledAutomations = plan.operations.automations.filter((automation) => automation.enabled).length;
-  const confirmations = plan.intake.confirmations.length;
 
   if (!reviewMode) {
     return language === "tr"
       ? [
           plan.company.mission
-            ? `${plan.company.name || plan.workspace.name || "Bu workspace"} için odak alanı ${plan.company.mission}.`
+            ? `Odak: ${plan.company.mission}.`
             : plan.company.name || plan.workspace.name
-              ? `${plan.company.name || plan.workspace.name} için ilk operasyonel çıktıyı şekillendiriyorum.`
-              : "Bu workspace için ilk somut çıktıyı hâlâ netleştiriyorum.",
+              ? `İlk çıktı: ${plan.company.name || plan.workspace.name}.`
+              : "İlk çıktı netleşiyor.",
           plan.company.targetCustomer
-            ? `İlk hedef kitle: ${plan.company.targetCustomer}.`
-            : "İlk hedef kitleyi de gerektiğinde revize edebiliriz.",
+            ? `Kitle: ${plan.company.targetCustomer}.`
+            : "Kitle açık.",
           plan.intake.sources.length > 0
-            ? `${plan.intake.sources.length} bağlam kaynağını zaten topladım.`
-            : "Bir website, repo ya da kısa bir brief ver; ilk taslağı çıkarayım.",
-          `${sizeProfile.label.toLowerCase()} mod için ${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation taslağı hazır.`,
+            ? `${plan.intake.sources.length} kaynak topladım.`
+            : "URL, repo ya da kısa brief yeterli.",
+          `${enabledAgents} agent, ${enabledWorkflows} görev, ${enabledAutomations} automation.`,
           confirmations > 0
-            ? `Senden sadece ${confirmations} kritik revizyon daha gerekiyor.`
-            : "İlk taslak hazır; istediğin alanı revize edebiliriz."
+            ? `${confirmations} revizyon kaldı.`
+            : "Revizyona hazır."
         ].join(" ")
       : [
           plan.company.mission
-            ? `${plan.company.name || plan.workspace.name || "This workspace"} looks like a ${prettify(plan.workspace.template).toLowerCase()} company focused on ${plan.company.mission}.`
-            : plan.company.name || plan.workspace.name
-              ? `I am shaping the first operating outcome for ${plan.company.name || plan.workspace.name}.`
-              : "I am still shaping the first concrete outcome for this workspace.",
+            ? `Focus: ${plan.company.mission}.`
+            : `First outcome: ${plan.company.name || plan.workspace.name || "this workspace"}.`,
           plan.company.targetCustomer
-            ? `First audience: ${plan.company.targetCustomer}.`
-            : "We can still revise the first audience or user segment.",
+            ? `Audience: ${plan.company.targetCustomer}.`
+            : "Audience open.",
           plan.intake.sources.length > 0
-            ? `I already harvested ${plan.intake.sources.length} context source${plan.intake.sources.length === 1 ? "" : "s"}.`
-            : "Give me a website, repo, or short brief and I will infer the first draft.",
-          `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are drafted for ${sizeProfile.label.toLowerCase()} mode.`,
+            ? `I have ${plan.intake.sources.length} source${plan.intake.sources.length === 1 ? "" : "s"}.`
+            : "Add a URL, repo, or short brief.",
+          `${enabledAgents} agents, ${enabledWorkflows} workflows, ${enabledAutomations} automations.`,
           confirmations > 0
-            ? `Only ${confirmations} high-value revision${confirmations === 1 ? "" : "s"} still need your input.`
-            : "The first draft is ready and open for revision."
+            ? `${confirmations} revision${confirmations === 1 ? "" : "s"} left.`
+            : "Ready to revise."
         ].join(" ");
   }
 
   return language === "tr"
     ? [
-      plan.company.mission
-        ? `${plan.company.name || plan.workspace.name || "Bu şirket"} ${plan.company.mission} hedefi etrafında konumlandı.`
-        : "Şirket misyonu için hâlâ kısa ve net bir cümle gerekiyor.",
-      plan.company.targetCustomer
-        ? `Birincil hedef kitle: ${plan.company.targetCustomer}.`
-        : "Hedef müşteri gerektiğinde revize edilebilir.",
-      `${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation yapılandırıldı.`,
-      confirmations > 0
-        ? `Senden ${confirmations} revizyon daha gerekiyor.`
-        : blockers.length > 0
-          ? `Deploy öncesi ${blockers.length} blocker kaldı.`
-          : warnings.length > 0
-            ? `Gözden geçirilmesi gereken ${warnings.length} warning var.`
-            : "Kritik blocker kalmadı."
+        plan.company.mission
+          ? `Odak: ${plan.company.mission}.`
+          : "Misyon kısa bir cümle istiyor.",
+        plan.company.targetCustomer
+          ? `Kitle: ${plan.company.targetCustomer}.`
+          : "Kitle açık.",
+        `${enabledAgents} agent, ${enabledWorkflows} görev, ${enabledAutomations} automation.`,
+        confirmations > 0
+          ? `${confirmations} revizyon kaldı.`
+          : blockers.length > 0
+            ? `${blockers.length} blocker kaldı.`
+            : warnings.length > 0
+              ? `${warnings.length} warning var.`
+              : "Deploy'a hazır."
       ].join(" ")
     : [
-      plan.company.mission
-        ? `${plan.company.name || plan.workspace.name || "This company"} is pointed at ${plan.company.mission}.`
-        : "The company mission still needs a concise sentence.",
-      plan.company.targetCustomer
-        ? `Primary audience: ${plan.company.targetCustomer}.`
-        : "The target customer can still be revised.",
-      `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are configured.`,
-      confirmations > 0
-        ? `${confirmations} revision item${confirmations === 1 ? "" : "s"} still need your input.`
-        : blockers.length > 0
-          ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} remain before deploy.`
-          : warnings.length > 0
-            ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} remain to review.`
-            : "No hard blockers remain."
+        plan.company.mission
+          ? `Focus: ${plan.company.mission}.`
+          : "Mission still needs a short sentence.",
+        plan.company.targetCustomer
+          ? `Audience: ${plan.company.targetCustomer}.`
+          : "Audience open.",
+        `${enabledAgents} agents, ${enabledWorkflows} workflows, ${enabledAutomations} automations.`,
+        confirmations > 0
+          ? `${confirmations} revision${confirmations === 1 ? "" : "s"} left.`
+          : blockers.length > 0
+            ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} remain.`
+            : warnings.length > 0
+              ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} remain.`
+              : "Ready to deploy."
       ].join(" ");
 }
 
