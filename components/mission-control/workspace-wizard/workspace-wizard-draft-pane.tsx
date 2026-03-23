@@ -32,13 +32,10 @@ import type {
   MissionControlSnapshot,
   OperationProgressSnapshot,
   WorkspaceCreateRules,
-  WorkspaceSourceMode,
   WorkspacePlan,
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
 import { buildWorkspaceScaffoldPreview, WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
-import { buildDefaultWorkspaceAgents } from "@/lib/openclaw/workspace-presets";
-import { buildWorkspaceScaffoldDocuments } from "@/lib/openclaw/workspace-docs";
 import type { WorkspaceWizardQuickSetupPreset } from "@/lib/openclaw/workspace-wizard-mappers";
 import type { WorkspaceWizardSourceAnalysis } from "@/lib/openclaw/workspace-wizard-inference";
 import { cn } from "@/lib/utils";
@@ -377,9 +374,7 @@ export function WorkspaceWizardDraftPane({
                   <BasicSetupCard
                     surfaceTheme={surfaceTheme}
                     plan={plan}
-                    resolvedName={resolvedName}
                     template={resolvedTemplate}
-                    sourceMode={sourceAnalysis.createSourceMode}
                     rules={basicRules}
                     preset={basicPreset}
                     onRuleToggle={onBasicRuleToggle}
@@ -935,9 +930,7 @@ type BasicRuleToggleKey = keyof Pick<
 function BasicSetupCard({
   surfaceTheme,
   plan,
-  resolvedName,
   template,
-  sourceMode,
   rules,
   preset,
   onRuleToggle,
@@ -946,9 +939,7 @@ function BasicSetupCard({
 }: {
   surfaceTheme: SurfaceTheme;
   plan: WorkspacePlan | null;
-  resolvedName: string;
   template: WorkspaceTemplate;
-  sourceMode: WorkspaceSourceMode;
   rules: WorkspaceCreateRules;
   preset: WorkspaceWizardQuickSetupPreset;
   onRuleToggle: (rule: BasicRuleToggleKey) => void;
@@ -958,17 +949,6 @@ function BasicSetupCard({
   const isLight = surfaceTheme === "light";
   const toggleItems = buildBasicSetupToggleItems(template, rules);
   const filePreview = buildWorkspaceScaffoldPreview(template, rules);
-  const previewAgents = plan?.team.persistentAgents.filter((agent) => agent.enabled) ?? [];
-  const documents = buildWorkspaceScaffoldDocuments({
-    name: plan?.workspace.name || resolvedName || "Workspace",
-    brief: plan?.company.mission || plan?.product.offer || undefined,
-    template,
-    sourceMode,
-    rules,
-    agents: previewAgents.length > 0 ? previewAgents : buildDefaultWorkspaceAgents(template, "core"),
-    docOverrides: plan?.workspace.docOverrides,
-    toolExamples: []
-  });
   const hasPlan = Boolean(plan);
   const presetSummary =
     preset === "fastest"
@@ -1080,98 +1060,21 @@ function BasicSetupCard({
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {filePreview.map((file) => (
-            <FileToken key={file} surfaceTheme={surfaceTheme} label={file} />
+            <FileToken
+              key={file}
+              surfaceTheme={surfaceTheme}
+              label={file}
+              interactive={Boolean(hasPlan && onOpenDocumentEditor)}
+              onClick={hasPlan && onOpenDocumentEditor ? () => onOpenDocumentEditor(file) : undefined}
+            />
           ))}
           {rules.kickoffMission ? <FileToken surfaceTheme={surfaceTheme} label="Kickoff mission" accent /> : null}
         </div>
-      </div>
-
-      <div
-        className={cn(
-          "rounded-[18px] border px-3 py-3",
-          isLight ? "border-[#e8e0d6] bg-white" : "border-white/10 bg-white/[0.03]"
-        )}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p className={cn("text-[12px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
-              Editable documents
-            </p>
-            <p className={cn("mt-1 text-[12px] leading-5", isLight ? "text-[#70685f]" : "text-slate-300")}>
-              Open any generated file and keep the override attached to this draft.
-            </p>
-          </div>
-          {!hasPlan ? (
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em]",
-                isLight ? "border-[#e2d9cd] bg-[#f7f2eb] text-[#7a7168]" : "border-white/10 bg-white/[0.05] text-slate-400"
-              )}
-            >
-              Draft required
-            </span>
-          ) : null}
-        </div>
-
-        <div className="mt-3 space-y-2">
-          {documents.map((document) => (
-            <button
-              key={document.path}
-              type="button"
-              disabled={!hasPlan || !onOpenDocumentEditor}
-              onClick={() => {
-                if (!hasPlan || !onOpenDocumentEditor) {
-                  return;
-                }
-
-                onOpenDocumentEditor(document.path);
-              }}
-              className={cn(
-                "flex w-full items-center justify-between gap-3 rounded-[16px] border px-3 py-3 text-left transition-colors",
-                isLight ? "border-[#ece3d8] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]",
-                hasPlan && onOpenDocumentEditor
-                  ? isLight
-                    ? "hover:border-[#d8c8ba] hover:bg-[#f7f0e8]"
-                    : "hover:border-white/15 hover:bg-white/[0.05]"
-                  : "cursor-not-allowed opacity-60"
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className={cn("font-mono text-[11px] uppercase tracking-[0.12em]", isLight ? "text-[#544c44]" : "text-slate-200")}>
-                    {document.path}
-                  </p>
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.16em]",
-                      isLight ? "border-[#e0d7cc] bg-white text-[#7a7168]" : "border-white/10 bg-white/[0.05] text-slate-400"
-                    )}
-                  >
-                    {getDocumentCategoryLabel(document.category)}
-                  </span>
-                  {document.overridden ? (
-                    <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Customized" />
-                  ) : null}
-                </div>
-                <p className={cn("mt-1 text-[12px] leading-5", isLight ? "text-[#716960]" : "text-slate-300")}>
-                  {document.description}
-                </p>
-              </div>
-
-              <span
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.16em]",
-                  isLight
-                    ? "border-[#e0d7cc] bg-white text-[#50493f]"
-                    : "border-white/10 bg-white/[0.05] text-slate-200"
-                )}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </span>
-            </button>
-          ))}
-        </div>
+        {hasPlan && onOpenDocumentEditor ? (
+          <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
+            Click a document chip to edit its scaffold.
+          </p>
+        ) : null}
       </div>
 
       <p className={cn("text-[13px] leading-6", isLight ? "text-[#70685f]" : "text-slate-300")}>
@@ -1306,45 +1209,47 @@ function PresetButton({
 function FileToken({
   surfaceTheme,
   label,
-  accent = false
+  accent = false,
+  interactive = false,
+  onClick
 }: {
   surfaceTheme: SurfaceTheme;
   label: string;
   accent?: boolean;
+  interactive?: boolean;
+  onClick?: () => void;
 }) {
+  const className = cn(
+    "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[10px] transition-colors",
+    accent
+      ? surfaceTheme === "light"
+        ? "border-[#d8b184] bg-[#f8efe3] text-[#7c5a34]"
+        : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+      : surfaceTheme === "light"
+        ? "border-[#e4ddd3] bg-white text-[#6c645b]"
+        : "border-white/10 bg-white/[0.05] text-slate-300",
+    interactive
+      ? surfaceTheme === "light"
+        ? "cursor-pointer hover:border-[#d8c8ba] hover:bg-[#f6efe6]"
+        : "cursor-pointer hover:border-white/15 hover:bg-white/[0.08]"
+      : ""
+  );
+
+  if (interactive) {
+    return (
+      <button type="button" onClick={onClick} aria-label={`Edit ${label}`} className={className}>
+        <Pencil className="mr-1 h-3 w-3" />
+        {label}
+      </button>
+    );
+  }
+
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[10px]",
-        accent
-          ? surfaceTheme === "light"
-            ? "border-[#d8b184] bg-[#f8efe3] text-[#7c5a34]"
-            : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
-          : surfaceTheme === "light"
-            ? "border-[#e4ddd3] bg-white text-[#6c645b]"
-            : "border-white/10 bg-white/[0.05] text-slate-300"
-      )}
-    >
+    <span className={className}>
       <Check className="mr-1 h-3 w-3" />
       {label}
     </span>
   );
-}
-
-function getDocumentCategoryLabel(category: string) {
-  if (category === "core") {
-    return "Core";
-  }
-
-  if (category === "memory") {
-    return "Memory";
-  }
-
-  if (category === "docs") {
-    return "Docs";
-  }
-
-  return "Deliverables";
 }
 
 function buildBasicSetupToggleItems(template: WorkspaceTemplate, rules: WorkspaceCreateRules) {
