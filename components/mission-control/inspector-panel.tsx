@@ -786,6 +786,31 @@ function AgentContent({
   const workspace = snapshot.workspaces.find((entry) => entry.id === agent?.workspaceId);
   const model = snapshot.models.find((entry) => entry.id === agent?.modelId);
   const observedTools = agent?.observedTools ?? [];
+  const policyMeta = agent ? getAgentPresetMeta(agent.policy.preset) : null;
+  const policyRows = agent
+    ? [
+        {
+          label: "Preset",
+          value: formatAgentPresetLabel(agent.policy.preset)
+        },
+        {
+          label: "Missing tools",
+          value: formatAgentMissingToolBehaviorLabel(agent.policy.missingToolBehavior)
+        },
+        {
+          label: "Install scope",
+          value: formatAgentInstallScopeLabel(agent.policy.installScope)
+        },
+        {
+          label: "File access",
+          value: formatAgentFileAccessLabel(agent.policy.fileAccess)
+        },
+        {
+          label: "Network",
+          value: formatAgentNetworkAccessLabel(agent.policy.networkAccess)
+        }
+      ]
+    : [];
   const activeRuntimes = snapshot.runtimes
     .filter((runtime) => agent?.activeRuntimeIds.includes(runtime.id))
     .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
@@ -819,48 +844,71 @@ function AgentContent({
         <p>{model?.available === false ? "Currently unavailable" : model?.local ? "Local model route" : "Remote model route"}</p>
       </InfoCard>
 
-      <InfoCard icon={Cpu} title="Agent profile" value={agent.profile.purpose || "Profile not declared"}>
-        <p>{agent.profile.purpose || "No explicit purpose was found in the workspace bootstrap files."}</p>
-        <div className="flex flex-wrap gap-2">
-          {agent.profile.sourceFiles.length > 0 ? (
-            agent.profile.sourceFiles.map((sourceFile) => (
-              <Badge key={sourceFile} variant="muted">
-                {sourceFile}
-              </Badge>
-            ))
-          ) : (
-            <Badge variant="warning">derived from config</Badge>
-          )}
-        </div>
-      </InfoCard>
-
-      <InfoCard
-        icon={TerminalSquare}
-        title="Operating style"
-        value={`${agent.profile.operatingInstructions.length} rules`}
-      >
-        <div className="space-y-3">
+      <InfoCard icon={Cpu} title="Agent summary" value={formatAgentPresetLabel(agent.policy.preset)}>
+        <div className="space-y-4">
           <div>
-            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Operating instructions</p>
-            <InspectorBulletList
-              emptyLabel="No workspace bootstrap instructions were found."
-              items={agent.profile.operatingInstructions}
-            />
+            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Purpose</p>
+            <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+              <p className="text-[13px] leading-5 text-slate-200">
+                {agent.profile.purpose || "No explicit purpose was found in the workspace bootstrap files."}
+              </p>
+            </div>
           </div>
 
           <div>
-            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Response style</p>
+            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
             <InspectorTagGroup
-              emptyLabel="No explicit response style"
-              items={agent.profile.responseStyle}
+              emptyLabel="No explicit skills"
+              items={agent.skills}
               emptyVariant="muted"
               itemVariant="muted"
             />
           </div>
 
           <div>
-            <p className="mb-1 text-[10px] uppercase tracking-[0.22em] text-slate-500">Output preference</p>
-            <p>{agent.profile.outputPreference || "No explicit output preference was found."}</p>
+            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+            <div className="space-y-3">
+              <div>
+                <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Declared</p>
+                <InspectorTagGroup
+                  emptyLabel="No explicit tools configured"
+                  items={agent.tools}
+                  emptyVariant="muted"
+                  itemVariant="warning"
+                />
+              </div>
+
+              <div>
+                <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Observed</p>
+                <InspectorTagGroup
+                  emptyLabel="No runtime tool calls recovered yet"
+                  items={observedTools}
+                  emptyVariant="muted"
+                  itemVariant="default"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
+            <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-3">
+              <p className="text-[12px] leading-5 text-slate-400">
+                {policyMeta?.description ?? "No policy description available."}
+              </p>
+              <div className="mt-3 grid gap-1.5 text-[13px] text-slate-300">
+                {policyRows.map((row) => (
+                  <p key={row.label}>
+                    {row.label}: <span className="text-white">{row.value}</span>
+                  </p>
+                ))}
+                {agent.profile.outputPreference ? (
+                  <p>
+                    Output preference: <span className="text-white">{agent.profile.outputPreference}</span>
+                  </p>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       </InfoCard>
@@ -876,24 +924,6 @@ function AgentContent({
           {typeof agent.heartbeat.everyMs === "number" ? (
             <Badge variant="muted">{Math.round(agent.heartbeat.everyMs / 1000)}s interval</Badge>
           ) : null}
-        </div>
-      </InfoCard>
-
-      <InfoCard icon={TerminalSquare} title="Operating policy" value={formatAgentPresetLabel(agent.policy.preset)}>
-        <p>{getAgentPresetMeta(agent.policy.preset).description}</p>
-        <div className="mt-3 grid gap-2 text-[13px] text-slate-300">
-          <p>
-            Missing tools: <span className="text-white">{formatAgentMissingToolBehaviorLabel(agent.policy.missingToolBehavior)}</span>
-          </p>
-          <p>
-            Install scope: <span className="text-white">{formatAgentInstallScopeLabel(agent.policy.installScope)}</span>
-          </p>
-          <p>
-            File access: <span className="text-white">{formatAgentFileAccessLabel(agent.policy.fileAccess)}</span>
-          </p>
-          <p>
-            Network: <span className="text-white">{formatAgentNetworkAccessLabel(agent.policy.networkAccess)}</span>
-          </p>
         </div>
       </InfoCard>
 
