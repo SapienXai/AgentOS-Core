@@ -3,6 +3,7 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import {
   Ban,
+  ClipboardList,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -20,7 +21,6 @@ import { useEffect, useRef, useState } from "react";
 
 import type { TaskNodeData } from "@/components/mission-control/canvas-types";
 import { InteractiveContent } from "@/components/mission-control/interactive-content";
-import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTaskFeed } from "@/hooks/use-task-feed";
@@ -119,7 +119,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           : undefined
       }
       className={cn(
-        "relative w-[272px] overflow-hidden rounded-[20px] border border-white/[0.1] bg-[linear-gradient(180deg,rgba(15,24,40,0.96),rgba(8,13,24,0.96))] p-3.5 shadow-[0_18px_36px_rgba(0,0,0,0.28)] backdrop-blur-xl",
+        "relative w-[272px] overflow-visible rounded-[22px] border border-amber-200/10 bg-[linear-gradient(180deg,rgba(20,18,14,0.98),rgba(9,8,6,0.96))] p-3.5 shadow-[0_18px_36px_rgba(0,0,0,0.28)] backdrop-blur-xl",
         data.emphasis ? "opacity-100" : "opacity-72",
         selected && "border-cyan-300/[0.45] shadow-[0_20px_46px_rgba(34,211,238,0.16)]",
         isPendingCreation && "border-cyan-300/30 shadow-[0_24px_54px_rgba(34,211,238,0.2)]",
@@ -132,6 +132,13 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           "border-white/[0.06] bg-[linear-gradient(180deg,rgba(13,18,30,0.9),rgba(8,12,22,0.9))]"
       )}
     >
+      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[22px]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_0%,rgba(251,191,36,0.22),transparent_30%),radial-gradient(circle_at_12%_100%,rgba(217,119,6,0.08),transparent_26%)]" />
+        <div className="absolute inset-x-0 top-0 h-[4px] bg-[linear-gradient(90deg,rgba(251,191,36,0.78),rgba(217,119,6,0.18),rgba(255,255,255,0.04))]" />
+        <div className="absolute right-3 top-3 h-12 w-12 rounded-full bg-amber-300/10 blur-xl" />
+      </div>
+
+      <div className="relative z-10">
       {isPendingCreation ? (
         <motion.div
           className="pointer-events-none absolute inset-[-16px] rounded-[24px] border border-cyan-200/16"
@@ -147,109 +154,102 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         className="!h-2.5 !w-2.5 !border-0 !bg-white/35"
       />
 
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.22em] text-slate-500">
-            <StatusDot
-              tone={
-                isPendingCreation
-                  ? "bg-cyan-300"
-                  : isAborted
-                    ? "bg-rose-200"
-                    : data.task.status === "stalled"
-                      ? "bg-amber-200"
-                      : data.task.status === "completed"
-                        ? "bg-emerald-300"
-                        : data.task.status === "running"
-                          ? "bg-cyan-300"
-                          : "bg-amber-200"
-              }
-            />
-            {isPendingCreation ? "Task bootstrap" : "Task"}
-          </div>
-          <p className="mt-1.5 line-clamp-1 font-display text-[0.98rem] leading-5 text-white">
-            {compactMissionText(data.task.title || data.task.mission, 44) || data.task.title}
-          </p>
-          <p className="mt-1 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">
-            {data.task.primaryAgentName || "OpenClaw"}
-          </p>
-        </div>
+      <div className="relative z-20 overflow-visible rounded-[18px] border border-amber-200/12 bg-amber-400/[0.05] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[9px] uppercase tracking-[0.24em] text-amber-100/75">Task</div>
 
-        <div className="nodrag nopan relative" ref={menuRef}>
-          <button
-            type="button"
-            aria-label="Task actions"
-            onClick={(event) => {
-              event.stopPropagation();
-              setMenuOpen((current) => !current);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
-          >
-            <MoreHorizontal className="h-3 w-3" />
-          </button>
-
-          {menuOpen ? (
-            <div
-              className="nodrag nopan absolute right-0 top-[calc(100%+8px)] z-30 min-w-[148px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
-              onClick={(event) => event.stopPropagation()}
+          <div className="nodrag nopan relative flex items-center gap-1.5" ref={menuRef}>
+            <Badge variant={badgeVariant} className="max-w-[112px] truncate">
+              {badgeLabel}
+            </Badge>
+            <button
+              type="button"
+              aria-label="Task actions"
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((current) => !current);
+              }}
               onPointerDown={(event) => event.stopPropagation()}
+              className="nodrag nopan inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
             >
-              <TaskMenuButton
-                icon={CornerDownLeft}
-                label="Use prompt"
-                onClick={() => {
-                  data.onReply?.(data.task);
-                  setMenuOpen(false);
-                }}
-              />
-              <TaskMenuButton
-                icon={Copy}
-                label="Copy mission"
-                onClick={() => {
-                  data.onCopyPrompt?.(data.task);
-                  setMenuOpen(false);
-                }}
-              />
-              <TaskMenuButton
-                icon={EyeOff}
-                label="Hide"
-                onClick={() => {
-                  data.onHide?.(data.task);
-                  setMenuOpen(false);
-                }}
-              />
-              {data.onAbortTask && (isAbortable || isAborted) ? (
-                <TaskMenuButton
-                  icon={Ban}
-                  label={isAborted ? "Aborted" : "Abort task"}
-                  destructive
-                  disabled={!isAbortable}
-                  onClick={() => {
-                    if (!isAbortable) {
-                      return;
-                    }
+              <MoreHorizontal className="h-3 w-3" />
+            </button>
 
-                    data.onAbortTask?.(data.task);
+            {menuOpen ? (
+              <div
+                className="nodrag nopan absolute right-0 top-[calc(100%+8px)] z-[70] min-w-[148px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <TaskMenuButton
+                  icon={CornerDownLeft}
+                  label="Use prompt"
+                  onClick={() => {
+                    data.onReply?.(data.task);
                     setMenuOpen(false);
                   }}
                 />
-              ) : null}
-              <TaskMenuButton
-                icon={data.locked ? LockOpen : Lock}
-                label={data.locked ? "Unlock" : "Lock"}
-                onClick={() => {
-                  data.onToggleLock?.(data.task);
-                  setMenuOpen(false);
-                }}
-              />
-            </div>
-          ) : null}
+                <TaskMenuButton
+                  icon={Copy}
+                  label="Copy mission"
+                  onClick={() => {
+                    data.onCopyPrompt?.(data.task);
+                    setMenuOpen(false);
+                  }}
+                />
+                <TaskMenuButton
+                  icon={EyeOff}
+                  label="Hide"
+                  onClick={() => {
+                    data.onHide?.(data.task);
+                    setMenuOpen(false);
+                  }}
+                />
+                {data.onAbortTask && (isAbortable || isAborted) ? (
+                  <TaskMenuButton
+                    icon={Ban}
+                    label={isAborted ? "Aborted" : "Abort task"}
+                    destructive
+                    disabled={!isAbortable}
+                    onClick={() => {
+                      if (!isAbortable) {
+                        return;
+                      }
+
+                      data.onAbortTask?.(data.task);
+                      setMenuOpen(false);
+                    }}
+                  />
+                ) : null}
+                <TaskMenuButton
+                  icon={data.locked ? LockOpen : Lock}
+                  label={data.locked ? "Unlock" : "Lock"}
+                  onClick={() => {
+                    data.onToggleLock?.(data.task);
+                    setMenuOpen(false);
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-amber-300/20 bg-amber-400/[0.1] text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.12)]">
+            <ClipboardList className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-1 font-display text-[1rem] leading-5 text-white">
+              {compactMissionText(data.task.title || data.task.mission, 44) || data.task.title}
+            </p>
+            <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">
+              {data.task.primaryAgentName || "OpenClaw"}
+            </p>
+          </div>
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Badge variant={badgeVariant}>{badgeLabel}</Badge>
         {data.task.warningCount > 0 ? (
           <Badge variant="warning">
             {data.task.warningCount} review{data.task.warningCount === 1 ? "" : "s"}
@@ -266,7 +266,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         </span>
       </div>
 
-      <div className="mt-3 rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+      <div className="mt-3 rounded-[16px] border border-amber-300/12 bg-amber-400/[0.04] px-3 py-2.5">
         <p className="line-clamp-1 text-[12.5px] leading-5 text-slate-100">
           {compactMissionText(data.task.subtitle, 72) || data.task.subtitle}
         </p>
@@ -384,6 +384,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           </motion.div>
         )}
       </div>
+      </div>
     </motion.div>
   );
 }
@@ -485,8 +486,8 @@ function TaskQuickAction({
     <button
       type="button"
       className={cn(
-        "nodrag nopan flex min-h-[38px] w-full items-center justify-between rounded-[12px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-2.5 py-1.5 text-left transition-colors hover:border-cyan-300/20 hover:bg-cyan-400/[0.06]",
-        active && "border-cyan-300/30 bg-cyan-400/[0.08]"
+        "nodrag nopan flex min-h-[38px] w-full items-center justify-between rounded-[12px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-2.5 py-1.5 text-left transition-colors hover:border-amber-300/20 hover:bg-amber-400/[0.06]",
+        active && "border-amber-300/30 bg-amber-400/[0.08]"
       )}
       onClick={(event) => {
         event.stopPropagation();

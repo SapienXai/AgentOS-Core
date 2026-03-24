@@ -5,6 +5,7 @@ import {
   type Edge,
   type Node,
   type ReactFlowInstance,
+  MarkerType,
   useEdgesState,
   useNodesState
 } from "@xyflow/react";
@@ -24,6 +25,7 @@ import type {
   WorkspaceNodeData
 } from "@/components/mission-control/canvas-types";
 import { AgentNode } from "@/components/mission-control/nodes/agent-node";
+import { MissionConnectionEdge } from "@/components/mission-control/edges/mission-connection-edge";
 import { TaskNode } from "@/components/mission-control/nodes/task-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
 import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
@@ -45,6 +47,9 @@ const nodeTypes = {
   workspace: WorkspaceNode,
   agent: AgentNode,
   task: TaskNode
+};
+const edgeTypes = {
+  simplebezier: MissionConnectionEdge
 };
 const justCreatedTaskDurationMs = 12000;
 const nodePositionsStorageKey = "mission-control-node-positions";
@@ -373,11 +378,18 @@ export function MissionCanvas({
         maxZoom={1.2}
         defaultEdgeOptions={{
           type: "simplebezier",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 16,
+            height: 16,
+            color: "var(--mission-edge-arrow)"
+          },
           style: {
-            stroke: "rgba(148, 163, 184, 0.34)",
-            strokeWidth: 1.15
+            strokeWidth: 2.25
           }
         }}
+        edgeTypes={edgeTypes}
+        defaultMarkerColor="var(--mission-edge-arrow)"
         proOptions={{ hideAttribution: true }}
         className="h-full w-full rounded-[inherit]"
       />
@@ -556,8 +568,7 @@ function buildEdgesForNodes(tasks: TaskRecord[], nodes: CanvasNode[]) {
       zIndex: 4,
       animated: task.status === "running",
       style: {
-        stroke: task.status === "running" ? "rgba(107, 190, 255, 0.85)" : "rgba(148, 163, 184, 0.28)",
-        strokeWidth: task.status === "running" ? 1.45 : 1.05
+        strokeWidth: task.status === "running" ? 2.95 : 2.25
       }
     });
   }

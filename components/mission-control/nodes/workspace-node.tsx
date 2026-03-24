@@ -76,12 +76,12 @@ function Metric({
   value: string;
 }) {
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-slate-950/65 px-2.5 py-1 text-slate-300">
-      <Icon className="h-3 w-3 text-slate-400" />
-      <span className="workspace-node__metric-label text-[9px] uppercase tracking-[0.16em] text-slate-500">
+    <div className="workspace-node__chip inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1">
+      <Icon className="workspace-node__chip-icon h-3 w-3 text-inherit" />
+      <span className="workspace-node__chip-label text-[9px] uppercase tracking-[0.16em] text-inherit">
         {label}
       </span>
-      <span className="font-display text-[12px] text-white">{value}</span>
+      <span className="workspace-node__chip-value font-display text-[12px] text-inherit">{value}</span>
     </div>
   );
 }
@@ -110,27 +110,23 @@ function TaskToggleMetric({
       }}
       onPointerDown={(event) => event.stopPropagation()}
       className={cn(
-        "nodrag nopan group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-slate-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-default disabled:opacity-50",
-        taskCardsHidden
-          ? "border-cyan-300/28 bg-cyan-300/14 text-cyan-50 hover:bg-cyan-300/20"
-          : "border-white/[0.06] bg-slate-950/65 hover:border-white/[0.12] hover:bg-white/[0.08] hover:text-white",
+        "workspace-node__chip workspace-node__task-toggle nodrag nopan inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 focus-visible:outline-none disabled:cursor-default disabled:opacity-50",
         disabled && "pointer-events-none"
       )}
     >
       {taskCardsHidden ? (
-        <EyeOff className="h-3 w-3 text-cyan-100" />
+        <EyeOff className="workspace-node__chip-icon h-3 w-3 text-inherit" />
       ) : (
-        <Eye className="h-3 w-3 text-slate-400 transition-colors group-hover:text-slate-200" />
+        <Eye className="workspace-node__chip-icon h-3 w-3 text-inherit" />
       )}
       <span
         className={cn(
-          "workspace-node__metric-label text-[9px] uppercase tracking-[0.16em]",
-          taskCardsHidden ? "text-cyan-100/70" : "text-slate-500 group-hover:text-slate-300"
+          "workspace-node__chip-label text-[9px] uppercase tracking-[0.16em] text-inherit"
         )}
       >
         Runs
       </span>
-      <span className="font-display text-[12px] text-white">{value}</span>
+      <span className="workspace-node__chip-value font-display text-[12px] text-inherit">{value}</span>
     </button>
   );
 }

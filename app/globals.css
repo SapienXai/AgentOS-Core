@@ -106,16 +106,11 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(circle at center, transparent 44%, rgba(2, 6, 17, 0.36) 82%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 14%);
 }
 
 .mission-shell--light {
-  background:
-    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.82), transparent 28%),
-    radial-gradient(circle at 82% 14%, rgba(229, 215, 204, 0.76), transparent 24%),
-    linear-gradient(180deg, #fdfaf6 0%, #f8f5f0 48%, #e5d7cc 100%);
+  background: linear-gradient(180deg, #fdfaf6 0%, #f8f5f0 48%, #e5d7cc 100%);
 }
 
 .mission-shell--light::before {
@@ -126,9 +121,7 @@
 }
 
 .mission-shell--light::after {
-  background:
-    radial-gradient(circle at center, transparent 42%, rgba(214, 196, 183, 0.3) 84%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.46), transparent 18%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 16%);
 }
 
 .mission-canvas-backdrop {
@@ -144,9 +137,7 @@
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(circle at center, rgba(56, 189, 248, 0.1), transparent 60%),
-    linear-gradient(180deg, rgba(4, 11, 22, 0.08), rgba(4, 11, 22, 0.02));
+  background: linear-gradient(180deg, rgba(4, 11, 22, 0.06), rgba(4, 11, 22, 0.01));
 }
 
 .mission-canvas-backdrop::after {
@@ -155,21 +146,15 @@
   inset: 0;
   pointer-events: none;
   z-index: 20;
-  background:
-    radial-gradient(circle at center, transparent 34%, rgba(2, 6, 17, 0.22) 82%),
-    linear-gradient(180deg, rgba(2, 6, 17, 0.02), rgba(2, 6, 17, 0.18));
+  background: linear-gradient(180deg, rgba(2, 6, 17, 0.02), rgba(2, 6, 17, 0.08));
 }
 
 .mission-shell--light .mission-canvas-backdrop::before {
-  background:
-    radial-gradient(circle at center, rgba(229, 215, 204, 0.44), transparent 60%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(229, 215, 204, 0.08));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(229, 215, 204, 0.04));
 }
 
 .mission-shell--light .mission-canvas-backdrop::after {
-  background:
-    radial-gradient(circle at center, transparent 34%, rgba(214, 196, 183, 0.18) 82%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(214, 196, 183, 0.2));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(214, 196, 183, 0.08));
 }
 
 .mission-canvas-frame::before {
@@ -178,15 +163,11 @@
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(circle at center, rgba(56, 189, 248, 0.08), transparent 58%),
-    linear-gradient(180deg, rgba(4, 11, 22, 0.16), rgba(4, 11, 22, 0.02));
+  background: linear-gradient(180deg, rgba(4, 11, 22, 0.08), rgba(4, 11, 22, 0.01));
 }
 
 .mission-shell--light .mission-canvas-frame::before {
-  background:
-    radial-gradient(circle at center, rgba(229, 215, 204, 0.5), transparent 58%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(229, 215, 204, 0.08));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(229, 215, 204, 0.04));
 }
 
 .mission-canvas-pattern {
@@ -216,8 +197,117 @@
   color: #7b6455;
 }
 
-.mission-shell--light .workspace-node__metric-label {
-  color: #d9c8bb;
+.mission-shell {
+  --workspace-chip-border: rgba(255, 255, 255, 0.06);
+  --workspace-chip-border-hover: rgba(255, 255, 255, 0.12);
+  --workspace-chip-bg: rgba(8, 15, 28, 0.68);
+  --workspace-chip-bg-hover: rgba(255, 255, 255, 0.08);
+  --workspace-chip-text: rgba(226, 232, 240, 0.92);
+  --workspace-chip-text-hover: #ffffff;
+  --workspace-chip-shadow: 0 10px 18px rgba(0, 0, 0, 0.12);
+  --workspace-chip-focus: rgba(125, 211, 252, 0.38);
+  --mission-edge-core: rgba(116, 199, 255, 0.94);
+  --mission-edge-core-active: rgba(179, 232, 255, 0.98);
+  --mission-edge-glow: rgba(59, 130, 246, 0.28);
+  --mission-edge-glow-active: rgba(96, 165, 250, 0.34);
+  --mission-edge-arrow: rgba(210, 232, 255, 0.94);
+  --mission-edge-packet: rgba(232, 249, 255, 0.98);
+}
+
+.mission-shell--light {
+  --workspace-chip-border: rgba(185, 145, 114, 0.24);
+  --workspace-chip-border-hover: rgba(185, 145, 114, 0.36);
+  --workspace-chip-bg: rgba(255, 249, 243, 0.82);
+  --workspace-chip-bg-hover: rgba(248, 239, 231, 0.98);
+  --workspace-chip-text: #5d4637;
+  --workspace-chip-text-hover: #3d2e25;
+  --workspace-chip-shadow: 0 12px 22px rgba(161, 125, 101, 0.12);
+  --workspace-chip-focus: rgba(184, 149, 102, 0.28);
+  --mission-edge-core: rgba(126, 84, 58, 0.84);
+  --mission-edge-core-active: rgba(146, 94, 60, 0.98);
+  --mission-edge-glow: rgba(184, 149, 102, 0.28);
+  --mission-edge-glow-active: rgba(201, 166, 123, 0.34);
+  --mission-edge-arrow: rgba(109, 74, 50, 0.96);
+  --mission-edge-packet: rgba(112, 77, 55, 0.96);
+}
+
+.workspace-node__chip {
+  border-color: var(--workspace-chip-border) !important;
+  background: var(--workspace-chip-bg) !important;
+  color: var(--workspace-chip-text) !important;
+  box-shadow: var(--workspace-chip-shadow) !important;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.workspace-node__chip:hover:not(:disabled) {
+  border-color: var(--workspace-chip-border-hover) !important;
+  background: var(--workspace-chip-bg-hover) !important;
+  color: var(--workspace-chip-text-hover) !important;
+}
+
+.workspace-node__chip:focus-visible {
+  outline: 2px solid var(--workspace-chip-focus);
+  outline-offset: 2px;
+}
+
+.workspace-node__chip-icon,
+.workspace-node__chip-label,
+.workspace-node__chip-value {
+  color: inherit !important;
+}
+
+.mission-shell .react-flow__edge .mission-edge__path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke 180ms ease,
+    opacity 180ms ease,
+    filter 180ms ease;
+}
+
+.mission-shell .react-flow__edge .mission-edge__path--glow {
+  stroke: var(--mission-edge-glow);
+  opacity: 0.82;
+  filter: drop-shadow(0 0 10px var(--mission-edge-glow));
+}
+
+.mission-shell .react-flow__edge .mission-edge__path--core {
+  stroke: var(--mission-edge-core);
+  opacity: 0.98;
+}
+
+.mission-shell .react-flow__edge.animated .mission-edge__path--glow {
+  stroke: var(--mission-edge-glow-active);
+  opacity: 0.95;
+}
+
+.mission-shell .react-flow__edge.animated .mission-edge__path--core {
+  stroke: var(--mission-edge-core-active);
+}
+
+.mission-shell .react-flow__edge.selected .mission-edge__path--glow,
+.mission-shell .react-flow__edge.selected .mission-edge__path--core {
+  opacity: 1;
+}
+
+.mission-shell .react-flow__edge.selected .mission-edge__path--glow {
+  filter: drop-shadow(0 0 14px var(--mission-edge-glow-active));
+}
+
+.mission-shell .react-flow__edge .mission-edge__packet {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.mission-shell .react-flow__edge .mission-edge__packet circle {
+  fill: currentColor;
+  stroke: none;
 }
 
 .mission-shell--light .workspace-node__health {
@@ -268,14 +358,6 @@
 
 .react-flow__renderer {
   background: transparent;
-}
-
-.react-flow__edge path {
-  filter: drop-shadow(0 0 8px rgba(89, 153, 255, 0.08));
-}
-
-.mission-shell--light .react-flow__edge path {
-  filter: drop-shadow(0 0 8px rgba(168, 132, 106, 0.14));
 }
 
 .react-flow__controls-button {
