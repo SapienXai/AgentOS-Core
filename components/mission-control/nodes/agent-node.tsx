@@ -56,7 +56,9 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         ? `${Math.round(data.agent.heartbeat.everyMs / 1000)}s`
         : null)
     : null;
-  const lastActiveLabel = data.agent.lastActiveAt ? formatRelativeTime(data.agent.lastActiveAt) : "No recent activity";
+  const lastActiveLabel = data.agent.lastActiveAt
+    ? formatRelativeTime(data.agent.lastActiveAt, data.relativeTimeReferenceMs)
+    : "No recent activity";
   const roleSummary = `${formatAgentPresetLabel(data.agent.policy.preset)} · ${skillLabel} · ${toolLabel}`;
   const postureSummary = data.agent.lastActiveAt
     ? `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"} · Last active ${lastActiveLabel}`

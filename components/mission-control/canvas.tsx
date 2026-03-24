@@ -26,6 +26,7 @@ import type {
 import { AgentNode } from "@/components/mission-control/nodes/agent-node";
 import { TaskNode } from "@/components/mission-control/nodes/task-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
+import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, OpenClawAgent, TaskRecord } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -95,10 +96,12 @@ export function MissionCanvas({
   const hasHydratedPersistedNodePositionsRef = useRef(false);
   const skipNextPersistRef = useRef(false);
   const shouldMergePositionsRef = useRef(false);
+  const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const [justCreatedTaskIds, setJustCreatedTaskIds] = useState<string[]>([]);
   const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
   const initialGraph = buildCanvasGraph(
     snapshot,
+    relativeTimeReferenceMs,
     activeWorkspaceId,
     justCreatedTaskIds,
     hiddenRuntimeIds,
@@ -165,6 +168,7 @@ export function MissionCanvas({
   useEffect(() => {
     const nextGraph = buildCanvasGraph(
       snapshot,
+      relativeTimeReferenceMs,
       activeWorkspaceId,
       justCreatedTaskIds,
       hiddenRuntimeIds,
@@ -206,6 +210,7 @@ export function MissionCanvas({
     onToggleTaskLock,
     onAbortTask,
     onInspectTask,
+    relativeTimeReferenceMs,
     setEdges,
     setNodes
   ]);
@@ -382,6 +387,7 @@ export function MissionCanvas({
 
 function buildCanvasGraph(
   snapshot: MissionControlSnapshot,
+  relativeTimeReferenceMs: number,
   activeWorkspaceId: string | null,
   justCreatedTaskIds: string[],
   hiddenRuntimeIds: string[],
@@ -447,6 +453,7 @@ function buildCanvasGraph(
         data: {
           agent,
           emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+          relativeTimeReferenceMs,
           onEdit: onEditAgent,
           onDelete: onDeleteAgent
         }
@@ -480,6 +487,7 @@ function buildCanvasGraph(
           data: {
             task,
             emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+            relativeTimeReferenceMs,
             pendingCreation: isBootstrapTask,
             justCreated: isJustCreatedTask,
             locked: lockedTaskKeys.includes(task.key),

@@ -1,21 +1,30 @@
-import { formatDistanceToNowStrict } from "date-fns";
+import { formatDistanceStrict } from "date-fns";
 
 import type { AgentStatus, DiagnosticHealth, RuntimeStatus } from "@/lib/openclaw/types";
 
-export function formatRelativeTime(timestamp: number | null | undefined) {
-  if (!timestamp) {
+export function formatRelativeTime(timestamp: number | null | undefined, referenceTimeMs: number = Date.now()) {
+  if (timestamp == null || Number.isNaN(timestamp)) {
     return "No activity";
   }
 
-  return `${formatDistanceToNowStrict(timestamp, { addSuffix: true })}`;
+  return `${formatDistanceStrict(timestamp, referenceTimeMs, { addSuffix: true })}`;
 }
 
-export function formatAge(ageMs: number | null | undefined) {
-  if (typeof ageMs !== "number") {
+export function formatAge(ageMs: number | null | undefined, referenceTimeMs: number = Date.now()) {
+  if (typeof ageMs !== "number" || Number.isNaN(ageMs)) {
     return "No age";
   }
 
-  return `${formatDistanceToNowStrict(Date.now() - ageMs, { addSuffix: true })}`;
+  return `${formatDistanceStrict(referenceTimeMs - ageMs, referenceTimeMs, { addSuffix: true })}`;
+}
+
+export function resolveRelativeTimeReferenceMs(generatedAt: string | null | undefined) {
+  if (!generatedAt) {
+    return Date.now();
+  }
+
+  const parsed = Date.parse(generatedAt);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
 export function formatContextWindow(value: number | null | undefined) {

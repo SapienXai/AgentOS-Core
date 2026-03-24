@@ -64,7 +64,9 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
     optimisticEvents.length > 0 && isTaskFeedEvent(optimisticEvents[optimisticEvents.length - 1])
       ? optimisticEvents[optimisticEvents.length - 1]
       : null;
-  const bootstrapElapsedLabel = isPendingCreation ? formatElapsedFromIso(dispatchSubmittedAt) : null;
+  const bootstrapElapsedLabel = isPendingCreation
+    ? formatElapsedFromIso(dispatchSubmittedAt, data.relativeTimeReferenceMs)
+    : null;
   const [expanded, setExpanded] = useState(false);
   const { feed, loading, error } = useTaskFeed(data.task.id, expanded);
   const latestFeedEvent = feed[feed.length - 1] ?? latestOptimisticEvent ?? null;
@@ -443,7 +445,7 @@ function resolveTaskFooterLabel(bootstrapStage: string | null, liveRunCount: num
   }
 }
 
-function formatElapsedFromIso(value: string | null) {
+function formatElapsedFromIso(value: string | null, referenceTimeMs: number) {
   if (!value) {
     return null;
   }
@@ -454,7 +456,7 @@ function formatElapsedFromIso(value: string | null) {
     return null;
   }
 
-  const elapsedMs = Math.max(Date.now() - timestamp, 0);
+  const elapsedMs = Math.max(referenceTimeMs - timestamp, 0);
   const seconds = Math.floor(elapsedMs / 1000);
 
   if (seconds < 60) {

@@ -36,6 +36,7 @@ import {
   formatContextWindow,
   formatRelativeTime,
   formatTokens,
+  resolveRelativeTimeReferenceMs,
   shortId
 } from "@/lib/openclaw/presenters";
 import type {
@@ -77,6 +78,7 @@ function InspectorPanelContent({
   activeTab,
   onActiveTabChange
 }: InspectorPanelProps) {
+  const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === selectedNodeId);
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selectedNodeId);
   const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
@@ -331,12 +333,12 @@ function InspectorPanelContent({
                 <Badge variant="muted">{selectedDetail}</Badge>
                 <p className="text-[12px] leading-5 text-slate-400">
                   {selectedTask
-                    ? `${selectedTask.runtimeCount} runs · ${selectedTask.liveRunCount} live · ${formatRelativeTime(selectedTask.updatedAt)}`
+                    ? `${selectedTask.runtimeCount} runs · ${selectedTask.liveRunCount} live · ${formatRelativeTime(selectedTask.updatedAt, relativeTimeReferenceMs)}`
                     : selectedRuntime
-                      ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · ${selectedRuntime.status} · ${formatRelativeTime(selectedRuntime.updatedAt)}`
+                      ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · ${selectedRuntime.status} · ${formatRelativeTime(selectedRuntime.updatedAt, relativeTimeReferenceMs)}`
                       : selectedAgent
                         ? `${selectedAgent.activeRuntimeIds.length} active runs`
-                        : selectedWorkspace
+                      : selectedWorkspace
                           ? `${selectedWorkspace.agentIds.length} agents attached`
                           : selectedModel
                             ? `${selectedModel.provider} model`
@@ -493,6 +495,7 @@ function GatewayOverview({
   snapshot: MissionControlSnapshot;
   lastMission: MissionResponse | null;
 }) {
+  const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const runtimePreflightValue =
     snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable
       ? snapshot.diagnostics.runtime.smokeTest.status === "passed"
@@ -518,7 +521,7 @@ function GatewayOverview({
           <p>
             Smoke test {snapshot.diagnostics.runtime.smokeTest.status} ·{" "}
             {snapshot.diagnostics.runtime.smokeTest.agentId || "unknown agent"} ·{" "}
-            {formatRelativeTime(Date.parse(snapshot.diagnostics.runtime.smokeTest.checkedAt))}
+            {formatRelativeTime(Date.parse(snapshot.diagnostics.runtime.smokeTest.checkedAt), relativeTimeReferenceMs)}
           </p>
         ) : (
           <p>No runtime smoke test has been recorded yet.</p>
@@ -572,6 +575,7 @@ function WorkspaceContent({
   snapshot: MissionControlSnapshot;
   workspaceId: string;
 }) {
+  const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
   const agents = snapshot.agents.filter((agent) => agent.workspaceId === workspaceId);
   const models = workspace
@@ -712,7 +716,11 @@ function WorkspaceContent({
 
       <InfoCard icon={TerminalSquare} title="Activity" value={`${liveRuntimes.length} live`}>
         <p>{workspaceRuntimes.length} tracked runs across {workspace.totalSessions} recorded sessions.</p>
-        <p>{latestRuntime ? `Latest update ${formatRelativeTime(latestRuntime.updatedAt)}` : "No runtime activity has been recorded yet."}</p>
+        <p>
+          {latestRuntime
+            ? `Latest update ${formatRelativeTime(latestRuntime.updatedAt, relativeTimeReferenceMs)}`
+            : "No runtime activity has been recorded yet."}
+        </p>
         {workspaceRuntimes.length > 0 ? (
           <div className="space-y-2 pt-1">
             {workspaceRuntimes.slice(0, 3).map((runtime) => (
@@ -773,6 +781,7 @@ function AgentContent({
   snapshot: MissionControlSnapshot;
   agentId: string;
 }) {
+  const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const agent = snapshot.agents.find((entry) => entry.id === agentId);
   const workspace = snapshot.workspaces.find((entry) => entry.id === agent?.workspaceId);
   const model = snapshot.models.find((entry) => entry.id === agent?.modelId);
@@ -858,7 +867,7 @@ function AgentContent({
 
       <InfoCard icon={Radar} title="Runtime posture" value={agent.status}>
         <p>{agent.currentAction}</p>
-        <p>Last active {formatRelativeTime(agent.lastActiveAt)}</p>
+        <p>Last active {formatRelativeTime(agent.lastActiveAt, relativeTimeReferenceMs)}</p>
         <p>{agent.heartbeat.enabled ? `Heartbeat ${agent.heartbeat.every}` : "Heartbeat disabled"}</p>
         <div className="flex flex-wrap gap-2">
           <Badge variant={agent.heartbeat.enabled ? "success" : "muted"}>
@@ -1454,6 +1463,7 @@ function RuntimeContent({
   runtimeOutputLoading: boolean;
   runtimeOutputError: string | null;
 }) {
+  const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
   const createdFiles = dedupeCreatedFiles(runtimeOutput?.createdFiles ?? (runtime ? extractCreatedFilesFromRuntime(runtime) : []));
   const runtimeWarnings = runtimeOutput?.warnings ?? (runtime ? extractWarningsFromRuntime(runtime) : []);
@@ -1471,7 +1481,7 @@ function RuntimeContent({
         {runtime.taskId ? <p>Task {shortId(runtime.taskId, 12)}</p> : null}
         {runtime.runId ? <p>Run {shortId(runtime.runId, 12)}</p> : null}
       </InfoCard>
-      <InfoCard icon={Radar} title="Activity" value={formatRelativeTime(runtime.updatedAt)}>
+      <InfoCard icon={Radar} title="Activity" value={formatRelativeTime(runtime.updatedAt, relativeTimeReferenceMs)}>
         <p>{runtime.subtitle}</p>
         <p>{formatTokens(runtime.tokenUsage?.total)} tokens</p>
       </InfoCard>
