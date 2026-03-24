@@ -17,9 +17,11 @@ export type WorkspaceNodeData = Record<string, unknown> & {
 export type AgentNodeData = Record<string, unknown> & {
   agent: OpenClawAgent;
   emphasis: boolean;
+  focused?: boolean;
   relativeTimeReferenceMs: number;
   onEdit?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
+  onFocus?: (agentId: string) => void;
 };
 
 export type RuntimeNodeData = Record<string, unknown> & {

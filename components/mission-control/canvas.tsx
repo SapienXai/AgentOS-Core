@@ -58,6 +58,7 @@ export function MissionCanvas({
   snapshot,
   activeWorkspaceId,
   selectedNodeId,
+  focusedAgentId,
   recentDispatchId,
   hiddenRuntimeIds,
   hiddenTaskKeys,
@@ -65,6 +66,7 @@ export function MissionCanvas({
   onToggleWorkspaceTaskCards,
   onEditAgent,
   onDeleteAgent,
+  onFocusAgent,
   onReplyTask,
   onCopyTaskPrompt,
   onHideTask,
@@ -77,6 +79,7 @@ export function MissionCanvas({
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
+  focusedAgentId: string | null;
   recentDispatchId: string | null;
   hiddenRuntimeIds: string[];
   hiddenTaskKeys: string[];
@@ -84,6 +87,7 @@ export function MissionCanvas({
   onToggleWorkspaceTaskCards: (workspaceId: string) => void;
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
+  onFocusAgent: (agentId: string) => void;
   onReplyTask: (task: TaskRecord) => void;
   onCopyTaskPrompt: (task: TaskRecord) => void;
   onHideTask: (task: TaskRecord) => void;
@@ -108,6 +112,7 @@ export function MissionCanvas({
     snapshot,
     relativeTimeReferenceMs,
     activeWorkspaceId,
+    focusedAgentId,
     justCreatedTaskIds,
     hiddenRuntimeIds,
     hiddenTaskKeys,
@@ -115,6 +120,7 @@ export function MissionCanvas({
     onToggleWorkspaceTaskCards,
     onEditAgent,
     onDeleteAgent,
+    onFocusAgent,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -175,6 +181,7 @@ export function MissionCanvas({
       snapshot,
       relativeTimeReferenceMs,
       activeWorkspaceId,
+      focusedAgentId,
       justCreatedTaskIds,
       hiddenRuntimeIds,
       hiddenTaskKeys,
@@ -182,6 +189,7 @@ export function MissionCanvas({
       onToggleWorkspaceTaskCards,
       onEditAgent,
       onDeleteAgent,
+      onFocusAgent,
       onReplyTask,
       onCopyTaskPrompt,
       onHideTask,
@@ -202,6 +210,7 @@ export function MissionCanvas({
   }, [
     snapshot,
     activeWorkspaceId,
+    focusedAgentId,
     justCreatedTaskIds,
     hiddenRuntimeIds,
     hiddenTaskKeys,
@@ -209,6 +218,7 @@ export function MissionCanvas({
     onToggleWorkspaceTaskCards,
     onEditAgent,
     onDeleteAgent,
+    onFocusAgent,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -238,6 +248,22 @@ export function MissionCanvas({
       })
     );
   }, [selectedNodeId, setNodes]);
+
+  useEffect(() => {
+    if (!reactFlowRef.current) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      reactFlowRef.current?.fitView({
+        padding: focusedAgentId ? 0.2 : 0.14,
+        duration: 500,
+        maxZoom: focusedAgentId ? 1.05 : 0.9
+      });
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [focusedAgentId]);
 
   useEffect(() => {
     if (!recentDispatchId || handledDispatchIdsRef.current.has(recentDispatchId)) {
@@ -401,6 +427,7 @@ function buildCanvasGraph(
   snapshot: MissionControlSnapshot,
   relativeTimeReferenceMs: number,
   activeWorkspaceId: string | null,
+  focusedAgentId: string | null,
   justCreatedTaskIds: string[],
   hiddenRuntimeIds: string[],
   hiddenTaskKeys: string[],
@@ -408,6 +435,7 @@ function buildCanvasGraph(
   onToggleWorkspaceTaskCards: (workspaceId: string) => void,
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
+  onFocusAgent: (agentId: string) => void,
   onReplyTask: (task: TaskRecord) => void,
   onCopyTaskPrompt: (task: TaskRecord) => void,
   onHideTask: (task: TaskRecord) => void,
@@ -416,26 +444,44 @@ function buildCanvasGraph(
   onInspectTask: (task: TaskRecord, target: "overview" | "output" | "files") => void,
   persistedNodePositions: PersistedNodePositionMap
 ) {
-  const visibleWorkspaces = activeWorkspaceId
-    ? snapshot.workspaces.filter((workspace) => workspace.id === activeWorkspaceId)
-    : [...snapshot.workspaces].sort(
-        (left, right) => right.activeRuntimeIds.length - left.activeRuntimeIds.length
-      );
+  const focusedAgent = focusedAgentId
+    ? snapshot.agents.find((agent) => agent.id === focusedAgentId)
+    : null;
+  const focusWorkspaceId = focusedAgent?.workspaceId ?? null;
+  const isFocusMode = focusedAgent !== null;
+  const visibleWorkspaces = isFocusMode
+    ? snapshot.workspaces.filter((workspace) => workspace.id === focusWorkspaceId)
+    : activeWorkspaceId
+      ? snapshot.workspaces.filter((workspace) => workspace.id === activeWorkspaceId)
+      : [...snapshot.workspaces].sort(
+          (left, right) => right.activeRuntimeIds.length - left.activeRuntimeIds.length
+        );
 
   const workspaceNodes: WorkspaceCanvasNode[] = [];
   const contentNodes: Array<AgentCanvasNode | TaskCanvasNode> = [];
   const graphTasks: TaskRecord[] = [];
 
   visibleWorkspaces.forEach((workspace, workspaceIndex) => {
-    const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
-    const workspaceTaskRecords = snapshot.tasks.filter((task) => task.workspaceId === workspace.id);
-    const workspaceToggleTasks = workspaceTaskRecords.filter(
-      (task) => !lockedTaskKeys.includes(task.key)
-    );
-    const workspaceTasks = workspaceTaskRecords.filter(
-      (task) => !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
-    );
+    const workspaceAgents = isFocusMode
+      ? snapshot.agents.filter(
+          (agent) => agent.workspaceId === workspace.id && agent.id === focusedAgentId
+        )
+      : snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
+    const workspaceTaskRecords = isFocusMode
+      ? snapshot.tasks.filter(
+          (task) => task.workspaceId === workspace.id && task.primaryAgentId === focusedAgentId
+        )
+      : snapshot.tasks.filter((task) => task.workspaceId === workspace.id);
+    const workspaceToggleTasks = isFocusMode
+      ? []
+      : workspaceTaskRecords.filter((task) => !lockedTaskKeys.includes(task.key));
+    const workspaceTasks = isFocusMode
+      ? workspaceTaskRecords
+      : workspaceTaskRecords.filter(
+          (task) => !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
+        );
     const workspaceTaskCardsHidden =
+      !isFocusMode &&
       workspaceToggleTasks.length > 0 &&
       workspaceToggleTasks.every((task) => isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys));
     const groupX = (workspaceIndex % 2) * 1160 + 44;
@@ -464,10 +510,12 @@ function buildCanvasGraph(
         selected: false,
         data: {
           agent,
-          emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+          emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
+          focused: focusedAgentId === agent.id,
           relativeTimeReferenceMs,
           onEdit: onEditAgent,
-          onDelete: onDeleteAgent
+          onDelete: onDeleteAgent,
+          onFocus: onFocusAgent
         }
       });
 
@@ -498,7 +546,7 @@ function buildCanvasGraph(
           selected: false,
           data: {
             task,
-            emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+            emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
             relativeTimeReferenceMs,
             pendingCreation: isBootstrapTask,
             justCreated: isJustCreatedTask,
@@ -516,26 +564,29 @@ function buildCanvasGraph(
       laneY += Math.max(152, agentTasks.length * 152 + 44);
     });
 
-    workspaceNodes.push({
-      id: workspace.id,
-      type: "workspace",
-      draggable: false,
-      position: { x: groupX, y: groupY },
-      zIndex: 0,
-      style: {
-        width: 1060,
-        height: Math.max(laneY - groupY + 112, 700)
-      },
-      selectable: true,
-      selected: false,
-      data: {
-        workspace,
-        emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
-        taskCardCount: workspaceToggleTasks.length,
-        taskCardsHidden: workspaceTaskCardsHidden,
-        onToggleTaskCards: workspaceToggleTasks.length > 0 ? () => onToggleWorkspaceTaskCards(workspace.id) : undefined
-      }
-    });
+    if (!isFocusMode) {
+      workspaceNodes.push({
+        id: workspace.id,
+        type: "workspace",
+        draggable: false,
+        position: { x: groupX, y: groupY },
+        zIndex: 0,
+        style: {
+          width: 1060,
+          height: Math.max(laneY - groupY + 112, 700)
+        },
+        selectable: true,
+        selected: false,
+        data: {
+          workspace,
+          emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+          taskCardCount: workspaceToggleTasks.length,
+          taskCardsHidden: workspaceTaskCardsHidden,
+          onToggleTaskCards:
+            workspaceToggleTasks.length > 0 ? () => onToggleWorkspaceTaskCards(workspace.id) : undefined
+        }
+      });
+    }
   });
 
   const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes];

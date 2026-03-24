@@ -135,6 +135,13 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                 onPointerDown={(event) => event.stopPropagation()}
               >
                 <AgentMenuButton
+                  label={data.focused ? "Clear focus" : "Focus"}
+                  onClick={() => {
+                    data.onFocus?.(data.agent.id);
+                    setMenuOpen(false);
+                  }}
+                />
+                <AgentMenuButton
                   label="Edit"
                   onClick={() => {
                     data.onEdit?.(data.agent.id);

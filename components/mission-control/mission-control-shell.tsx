@@ -111,6 +111,7 @@ export function MissionControlShell({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     initialSnapshot.workspaces[0]?.id ?? null
   );
+  const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTabId>("overview");
   const [lastMission, setLastMission] = useState<MissionResponse | null>(null);
   const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
@@ -249,6 +250,26 @@ export function MissionControlShell({
     [uiSnapshot.tasks, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys]
   );
 
+  const handleFocusAgent = useCallback(
+    (agentId: string) => {
+      const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
+
+      if (!agent) {
+        return;
+      }
+
+      setFocusedAgentId((current) => (current === agentId ? null : agentId));
+      setActiveWorkspaceId(agent.workspaceId);
+      selectNode(agentId);
+    },
+    [selectNode, uiSnapshot.agents]
+  );
+
+  const handleResetFocus = useCallback(() => {
+    setFocusedAgentId(null);
+    selectNode(activeWorkspaceId ?? uiSnapshot.workspaces[0]?.id ?? null);
+  }, [activeWorkspaceId, selectNode, uiSnapshot.workspaces]);
+
   const openWorkspaceWizard = useCallback((mode: "basic" | "advanced" = "basic") => {
     setWorkspaceWizardEditId(null);
     setWorkspaceWizardInitialMode(mode);
@@ -324,10 +345,46 @@ export function MissionControlShell({
     const taskHidden =
       selectedTask && isTaskHiddenByPreferences(selectedTask, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys);
 
-    if (selectedNodeId && (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden)) {
+    if (!selectedNodeId) {
+      return;
+    }
+
+    if (focusedAgentId) {
+      const selectionVisibleInFocus =
+        selectedNodeId === focusedAgentId || selectedTask?.primaryAgentId === focusedAgentId;
+
+      if (!selectionVisibleInFocus) {
+        selectNode(focusedAgentId);
+      }
+      return;
+    }
+
+    if (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden) {
       selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
-  }, [selectedNodeId, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys, activeWorkspaceId, uiSnapshot.workspaces, uiSnapshot.tasks, selectNode]);
+  }, [
+    selectedNodeId,
+    focusedAgentId,
+    hiddenRuntimeIds,
+    hiddenTaskKeys,
+    lockedTaskKeys,
+    activeWorkspaceId,
+    uiSnapshot.workspaces,
+    uiSnapshot.tasks,
+    selectNode
+  ]);
+
+  useEffect(() => {
+    if (!focusedAgentId) {
+      return;
+    }
+
+    const focusedAgentExists = uiSnapshot.agents.some((agent) => agent.id === focusedAgentId);
+
+    if (!focusedAgentExists) {
+      setFocusedAgentId(null);
+    }
+  }, [focusedAgentId, uiSnapshot.agents]);
 
   useEffect(() => {
     const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
@@ -1538,6 +1595,7 @@ export function MissionControlShell({
             snapshot={uiSnapshot}
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
+            focusedAgentId={focusedAgentId}
             recentDispatchId={recentDispatchId}
             hiddenRuntimeIds={hiddenRuntimeIds}
             hiddenTaskKeys={hiddenTaskKeys}
@@ -1560,6 +1618,7 @@ export function MissionControlShell({
                 agentId
               });
             }}
+            onFocusAgent={handleFocusAgent}
             onReplyTask={(task) => {
               const prompt = resolveTaskPrompt(task);
               setComposeIntent({
@@ -1758,12 +1817,26 @@ export function MissionControlShell({
         </div>
 
         <div className="pointer-events-auto absolute bottom-[calc(env(safe-area-inset-bottom)+12px)] left-4 right-4 z-40 lg:bottom-6 lg:left-1/2 lg:right-auto lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">
-          {hiddenScopedTaskCount > 0 ? (
-            <div className="mx-auto mb-1 inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-[linear-gradient(180deg,rgba(10,16,26,0.96),rgba(6,10,18,0.94))] px-3 py-1 text-[8px] text-slate-200 shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
-              <EyeOff className="h-3 w-3 text-slate-400" />
-              <span className="leading-3 text-slate-300">{hiddenScopedTaskCount} hidden</span>
-            </div>
-          ) : null}
+          <div className="mx-auto mb-1 flex w-fit flex-col items-start gap-1">
+            {hiddenScopedTaskCount > 0 ? (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-[linear-gradient(180deg,rgba(10,16,26,0.96),rgba(6,10,18,0.94))] px-3 py-1 text-[8px] text-slate-200 shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
+                <EyeOff className="h-3 w-3 text-slate-400" />
+                <span className="leading-3 text-slate-300">{hiddenScopedTaskCount} hidden</span>
+              </div>
+            ) : null}
+            {focusedAgentId ? (
+              <button
+                type="button"
+                onClick={handleResetFocus}
+                className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/18 bg-[linear-gradient(180deg,rgba(16,25,38,0.98),rgba(8,12,20,0.96))] px-3 py-1 text-[8px] text-cyan-100 shadow-[0_10px_24px_rgba(0,0,0,0.14)] transition-colors hover:border-cyan-200/30 hover:bg-[linear-gradient(180deg,rgba(20,33,49,0.98),rgba(10,15,25,0.96))]"
+                aria-label="Reset focus and show the full workspace"
+                title="Reset Focus"
+              >
+                <RefreshCw className="h-3 w-3 text-cyan-300" />
+                <span className="leading-3 text-cyan-50">Reset Focus</span>
+              </button>
+            ) : null}
+          </div>
           <CommandBar
             snapshot={uiSnapshot}
             activeWorkspaceId={activeWorkspaceId}
