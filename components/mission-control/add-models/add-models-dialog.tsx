@@ -356,22 +356,29 @@ export function AddModelsDialog({
                 </Badge>
               </div>
 
-              <div className="mt-2.5 -mx-1 overflow-x-auto overscroll-x-contain pb-1">
-                <div className="flex min-w-max gap-2.5 px-1">
-                  {modelProviderRegistry.map((provider) => (
-                    <div key={provider.id} className="w-[236px] shrink-0 snap-start sm:w-[244px]">
-                      <ProviderCard
-                        descriptor={provider}
-                        active={activeProviderId === provider.id}
-                        compact
-                        connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
-                        detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
-                        onClick={() => {
-                          void selectProvider(provider.id);
-                        }}
-                      />
-                    </div>
-                  ))}
+              <div className="relative mt-2.5">
+                <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-[rgba(13,20,34,0.96)] to-transparent" />
+                <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-[rgba(13,20,34,0.96)] to-transparent" />
+                <div className="-mx-1 overflow-x-auto overscroll-x-contain pb-1">
+                  <div className="flex min-w-max gap-2.5 px-1">
+                    {modelProviderRegistry.map((provider) => (
+                      <div key={provider.id} className="w-[236px] shrink-0 snap-start sm:w-[244px]">
+                        <ProviderCard
+                          descriptor={provider}
+                          active={activeProviderId === provider.id}
+                          compact
+                          connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
+                          detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
+                          onClick={() => {
+                            void selectProvider(provider.id);
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="pointer-events-none absolute bottom-1.5 right-3 z-10 rounded-full border border-white/10 bg-slate-950/70 px-2 py-0.5 text-[8px] uppercase tracking-[0.14em] text-slate-400">
+                  Scroll -&gt;
                 </div>
               </div>
             </div>
