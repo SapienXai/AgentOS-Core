@@ -3112,20 +3112,25 @@ export async function createAgent(input: AgentCreateInput) {
     setupAgentId
   });
 
-  const configEntry = await upsertAgentConfigEntry(agentId, resolvedWorkspacePath, {
-    name: displayName,
-    model: normalizeOptionalValue(input.modelId),
-    heartbeat,
-    skills: [policySkillId],
-    tools:
-      policy.fileAccess === "workspace-only"
-        ? {
-            fs: {
-              workspaceOnly: true
+  const configEntry = await upsertAgentConfigEntry(
+    agentId,
+    resolvedWorkspacePath,
+    {
+      name: displayName,
+      model: normalizeOptionalValue(input.modelId),
+      heartbeat,
+      skills: [policySkillId],
+      tools:
+        policy.fileAccess === "workspace-only"
+          ? {
+              fs: {
+                workspaceOnly: true
+              }
             }
-          }
-        : null
-  });
+          : null
+    },
+    snapshot
+  );
 
   await applyAgentIdentity(agentId, resolvedWorkspacePath, {
     name: displayName || configEntry.name,
@@ -3201,20 +3206,25 @@ export async function updateAgent(input: AgentUpdateInput) {
     setupAgentId
   });
 
-  const configEntry = await upsertAgentConfigEntry(agentId, resolvedWorkspacePath, {
-    name: normalizeOptionalValue(input.name),
-    model: normalizeOptionalValue(input.modelId),
-    heartbeat,
-    skills: [...agent.skills, policySkillId],
-    tools:
-      policy.fileAccess === "workspace-only"
-        ? {
-            fs: {
-              workspaceOnly: true
+  const configEntry = await upsertAgentConfigEntry(
+    agentId,
+    resolvedWorkspacePath,
+    {
+      name: normalizeOptionalValue(input.name),
+      model: normalizeOptionalValue(input.modelId),
+      heartbeat,
+      skills: [...agent.skills, policySkillId],
+      tools:
+        policy.fileAccess === "workspace-only"
+          ? {
+              fs: {
+                workspaceOnly: true
+              }
             }
-          }
-        : null
-  });
+          : null
+    },
+    snapshot
+  );
 
   await applyAgentIdentity(agentId, resolvedWorkspacePath, {
     name: normalizeOptionalValue(input.name) ?? configEntry.name,
@@ -3262,7 +3272,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
   await runOpenClaw(["agents", "delete", agent.id, "--force", "--json"]);
 
   try {
-    const configList = await readAgentConfigList();
+    const configList = await readAgentConfigList(snapshot);
     const nextConfigList = configList.filter((entry) => entry.id !== agent.id);
 
     if (nextConfigList.length !== configList.length) {
@@ -3501,7 +3511,7 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
       );
     }
 
-    const configList = await readAgentConfigList();
+    const configList = await readAgentConfigList(snapshot);
     const updatedConfig = configList.map((entry) =>
       entry.workspace === workspace.path
         ? {
@@ -3594,6 +3604,9 @@ async function applyWorkspacePlanEdits(
       ? resolveWorkspaceTargetPath(workspace.path, desiredName, undefined)
       : workspace.path;
   const workspaceRelocated = targetPath !== workspace.path;
+  const snapshot = workspaceRelocated
+    ? await getMissionControlSnapshot({ force: true, includeHidden: true })
+    : null;
 
   if (workspaceRelocated) {
     await ensurePathAvailable(targetPath, workspace.path);
@@ -3608,7 +3621,7 @@ async function applyWorkspacePlanEdits(
       );
     }
 
-    const configList = await readAgentConfigList();
+    const configList = await readAgentConfigList(snapshot ?? undefined);
     const updatedConfig = configList.map((entry) =>
       entry.workspace === workspace.path
         ? {
@@ -3875,7 +3888,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
   }
 
   try {
-    const configList = await readAgentConfigList();
+    const configList = await readAgentConfigList(snapshot);
     const nextConfigList = configList.filter(
       (entry) => entry.workspace !== workspace.path && !workspaceAgents.some((agent) => agent.id === entry.id)
     );
@@ -5625,9 +5638,10 @@ async function upsertAgentConfigEntry(
     heartbeat?: { every?: string } | null;
     skills?: string[];
     tools?: MutableAgentConfigEntry["tools"] | null;
-  }
+  },
+  snapshot?: MissionControlSnapshot
 ) {
-  const configList = await readAgentConfigList();
+  const configList = await readAgentConfigList(snapshot);
   const existingIndex = configList.findIndex((entry) => entry.id === agentId);
   const nextEntry: MutableAgentConfigEntry =
     existingIndex >= 0
@@ -5679,15 +5693,23 @@ async function upsertAgentConfigEntry(
   return nextEntry;
 }
 
-async function readAgentConfigList() {
-  const config = await runOpenClawJson<MutableAgentConfigEntry[]>([
-    "config",
-    "get",
-    "agents.list",
-    "--json"
-  ]);
+async function readAgentConfigList(snapshot?: MissionControlSnapshot) {
+  try {
+    const config = await runOpenClawJson<MutableAgentConfigEntry[]>([
+      "config",
+      "get",
+      "agents.list",
+      "--json"
+    ]);
 
-  return Array.isArray(config) ? config : [];
+    return Array.isArray(config) ? config : [];
+  } catch (error) {
+    if (isMissingAgentConfigListError(error)) {
+      return snapshot ? buildAgentConfigListFromSnapshot(snapshot) : [];
+    }
+
+    throw error;
+  }
 }
 
 async function writeAgentConfigList(configList: MutableAgentConfigEntry[]) {
@@ -5698,6 +5720,83 @@ async function writeAgentConfigList(configList: MutableAgentConfigEntry[]) {
     "agents.list",
     JSON.stringify(configList)
   ]);
+}
+
+function isMissingAgentConfigListError(error: unknown) {
+  const message = extractErrorMessage(error);
+  return /Config path not found:\s*agents\.list|Config path not found:\s*agents\.list/i.test(message);
+}
+
+function buildAgentConfigListFromSnapshot(snapshot: MissionControlSnapshot) {
+  return snapshot.agents.map((agent) => {
+    const identity = {
+      name: agent.name,
+      ...(agent.identity.emoji ? { emoji: agent.identity.emoji } : {}),
+      ...(agent.identity.theme ? { theme: agent.identity.theme } : {}),
+      ...(agent.identity.avatar ? { avatar: agent.identity.avatar } : {})
+    };
+
+    const configEntry: MutableAgentConfigEntry = {
+      id: agent.id,
+      workspace: agent.workspacePath,
+      name: agent.name
+    };
+
+    if (agent.modelId && agent.modelId !== "unassigned") {
+      configEntry.model = agent.modelId;
+    }
+
+    if (agent.heartbeat.enabled && agent.heartbeat.every) {
+      configEntry.heartbeat = {
+        every: agent.heartbeat.every
+      };
+    }
+
+    if (agent.skills.length > 0) {
+      configEntry.skills = uniqueStrings(agent.skills);
+    }
+
+    if (agent.tools.includes("fs.workspaceOnly")) {
+      configEntry.tools = {
+        fs: {
+          workspaceOnly: true
+        }
+      };
+    }
+
+    if (Object.keys(identity).length > 0) {
+      configEntry.identity = identity;
+    }
+
+    if (agent.isDefault) {
+      configEntry.default = true;
+    }
+
+    return configEntry;
+  });
+}
+
+function extractErrorMessage(error: unknown) {
+  if (!error) {
+    return "";
+  }
+
+  if (error instanceof Error) {
+    const parts = [error.message];
+    if ("stderr" in error && typeof error.stderr === "string") {
+      parts.push(error.stderr);
+    }
+    if ("stdout" in error && typeof error.stdout === "string") {
+      parts.push(error.stdout);
+    }
+    return parts.filter(Boolean).join("\n");
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "";
 }
 
 async function applyAgentIdentity(

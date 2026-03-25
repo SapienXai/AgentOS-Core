@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to create agent."
+        error: formatAgentApiError("create", error)
       },
       { status: 400 }
     );
@@ -77,7 +77,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to update agent."
+        error: formatAgentApiError("update", error)
       },
       { status: 400 }
     );
@@ -92,9 +92,38 @@ export async function DELETE(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to delete agent."
+        error: formatAgentApiError("delete", error)
       },
       { status: 400 }
     );
   }
+}
+
+function formatAgentApiError(
+  action: "create" | "update" | "delete",
+  error: unknown
+) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (/Config path not found:\s*agents\.list/i.test(message)) {
+    return "OpenClaw is still initializing the agent registry for this workspace. Please try again in a moment.";
+  }
+
+  if (/Agent was not found\./i.test(message)) {
+    return "That agent no longer exists in the current workspace.";
+  }
+
+  if (/OpenClaw command failed with exit code \d+:/i.test(message)) {
+    return action === "delete"
+      ? "OpenClaw could not delete the agent right now. Please try again."
+      : action === "create"
+        ? "OpenClaw could not create the agent right now. Please try again."
+        : "OpenClaw could not update the agent right now. Please try again.";
+  }
+
+  return action === "delete"
+    ? "OpenClaw could not delete the agent right now. Please try again."
+    : action === "create"
+      ? "OpenClaw could not create the agent right now. Please try again."
+      : "OpenClaw could not update the agent right now. Please try again.";
 }

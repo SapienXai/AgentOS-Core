@@ -276,7 +276,13 @@ function extractFailedCommandResult(error: unknown): CommandResult | null {
 }
 
 function createCommandError(message: string, stdout: string, stderr: string, code: number | null) {
-  const error = new Error(message) as Error & {
+  const failureDetail = summarizeCommandFailure(stderr || stdout);
+  const resolvedMessage =
+    code !== null && /^OpenClaw command failed with exit code \d+\.$/.test(message) && failureDetail
+      ? `${message.slice(0, -1)}: ${failureDetail}.`
+      : message;
+
+  const error = new Error(resolvedMessage) as Error & {
     stdout: string;
     stderr: string;
     code: number | null;
@@ -287,6 +293,38 @@ function createCommandError(message: string, stdout: string, stderr: string, cod
   error.code = code;
 
   return error;
+}
+
+function summarizeCommandFailure(output: string) {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return "";
+  }
+
+  const priorityPatterns = [
+    /Config path not found/i,
+    /cannot find module/i,
+    /command not found/i,
+    /no such file or directory/i,
+    /permission denied/i,
+    /not writable/i,
+    /failed/i,
+    /\berror\b/i
+  ];
+
+  for (const pattern of priorityPatterns) {
+    const matched = lines.find((line) => pattern.test(line));
+
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return lines.at(-1) ?? "";
 }
 
 function stringifyStream(value: unknown) {
