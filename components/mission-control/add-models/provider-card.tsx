@@ -1,20 +1,9 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
-import { Bot, Cloud, Cpu, Link2, Sparkles, Waypoints } from "lucide-react";
-
 import { Badge } from "@/components/ui/badge";
+import { ProviderLogo } from "@/components/mission-control/provider-logo";
 import type { ModelProviderDescriptor } from "@/lib/openclaw/model-provider-registry";
 import { cn } from "@/lib/utils";
-
-const providerIcons: Record<ModelProviderDescriptor["id"], LucideIcon> = {
-  "openai-codex": Sparkles,
-  openrouter: Waypoints,
-  ollama: Cpu,
-  anthropic: Bot,
-  openai: Cloud,
-  xai: Link2
-};
 
 export function ProviderCard({
   descriptor,
@@ -31,8 +20,6 @@ export function ProviderCard({
   detail?: string | null;
   onClick: () => void;
 }) {
-  const Icon = providerIcons[descriptor.id];
-
   return (
     <button
       type="button"
@@ -48,17 +35,10 @@ export function ProviderCard({
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <div
-          className={cn(
-            "flex items-center justify-center rounded-[16px] border",
-            compact ? "h-8 w-8" : "h-10 w-10",
-            active
-              ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-100"
-              : "border-white/10 bg-white/[0.04] text-slate-200"
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
+        <ProviderLogo
+          className={cn(compact ? "h-8 w-8" : "h-10 w-10", active ? "ring-1 ring-cyan-300/20" : "")}
+          provider={descriptor.id}
+        />
         <Badge
           variant={connected ? "success" : active ? "default" : "muted"}
           className={cn("tracking-[0.12em]", compact ? "px-2 py-0.5 text-[10px]" : "")}

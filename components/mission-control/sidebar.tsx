@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
 import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
+import { ProviderLogo } from "@/components/mission-control/provider-logo";
 import {
   AlertTriangle,
   Bot,
@@ -1649,8 +1650,9 @@ function ProviderCard({
 
   return (
     <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex items-start gap-3">
+        <ProviderLogo className="h-8 w-8" provider={provider.provider} />
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="truncate font-display text-[15px] text-white">{formatProviderLabel(provider.provider)}</p>
             <Badge variant={provider.connected ? "success" : provider.canLogin ? "warning" : "muted"}>
