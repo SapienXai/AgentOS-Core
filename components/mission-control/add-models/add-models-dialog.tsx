@@ -342,22 +342,23 @@ export function AddModelsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[88dvh] max-h-[88dvh] w-[calc(100vw-20px)] max-w-[940px] flex-col gap-0 overflow-hidden p-0 sm:h-[min(88dvh,860px)] sm:max-h-[min(88dvh,860px)] sm:w-[min(940px,calc(100vw-40px))]">
-        <DialogHeader className="shrink-0 border-b border-white/10 bg-[linear-gradient(180deg,rgba(12,18,31,0.96),rgba(9,13,24,0.98))] px-6 py-5 pr-14">
-          <DialogTitle className="text-[1.35rem]">Add Models</DialogTitle>
-          <DialogDescription className="max-w-[560px] text-[13px] leading-6 text-slate-400">
+      <DialogContent className="flex h-[84dvh] max-h-[84dvh] w-[calc(100vw-20px)] max-w-[840px] flex-col gap-0 overflow-hidden p-0 sm:h-[min(84dvh,760px)] sm:max-h-[min(84dvh,760px)] sm:w-[min(840px,calc(100vw-40px))]">
+        <DialogHeader className="shrink-0 border-b border-white/10 bg-[linear-gradient(180deg,rgba(12,18,31,0.96),rgba(9,13,24,0.98))] px-5 py-4 pr-12">
+          <DialogTitle className="text-[1.2rem]">Add Models</DialogTitle>
+          <DialogDescription className="max-w-[520px] text-[12px] leading-[1.05rem] text-slate-400">
             Connect a provider, discover available models, and add them in seconds.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="space-y-6 px-5 py-5 sm:px-6 sm:py-6">
-            <div className="grid gap-4 lg:grid-cols-3">
+          <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
+            <div className="grid gap-3 lg:grid-cols-3">
               {primaryModelProviders.map((provider) => (
                 <ProviderCard
                   key={provider.id}
                   descriptor={provider}
                   active={activeProviderId === provider.id}
+                  compact
                   connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
                   detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
                   onClick={() => {
@@ -367,28 +368,28 @@ export function AddModelsDialog({
               ))}
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(13,20,34,0.94),rgba(9,13,24,0.96))]">
+            <div className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(13,20,34,0.94),rgba(9,13,24,0.96))]">
               <button
                 type="button"
                 onClick={() => setOtherProvidersOpen((current) => !current)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
               >
                 <div>
-                  <p className="font-display text-[0.95rem] text-white">Other providers</p>
-                  <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                  <p className="font-display text-[0.9rem] text-white">Other providers</p>
+                  <p className="mt-1 text-[10px] leading-[1.05rem] text-slate-400">
                     Simpler API-key setup for additional provider routes.
                   </p>
                 </div>
                 <ChevronDown
                   className={cn(
-                    "h-4 w-4 text-slate-400 transition-transform",
+                    "h-3.5 w-3.5 text-slate-400 transition-transform",
                     otherProvidersOpen ? "rotate-180" : "rotate-0"
                   )}
                 />
               </button>
 
               {otherProvidersOpen ? (
-                <div className="grid gap-3 border-t border-white/10 px-4 py-4 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-2.5 border-t border-white/10 px-3.5 py-3.5 md:grid-cols-2 xl:grid-cols-3">
                   {otherModelProviders.map((provider) => (
                     <ProviderCard
                       key={provider.id}
@@ -406,13 +407,13 @@ export function AddModelsDialog({
               ) : null}
             </div>
 
-            <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,32,0.96),rgba(6,10,18,0.98))] p-4 sm:p-5">
+            <div className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,32,0.96),rgba(6,10,18,0.98))] p-4">
               {activeProviderId && activeDescriptor ? (
                 <>
-                  <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="font-display text-[1rem] text-white">{activeDescriptor.label}</p>
-                      <p className="mt-1 max-w-[620px] text-[12px] leading-6 text-slate-400">
+                      <p className="font-display text-[0.95rem] text-white">{activeDescriptor.label}</p>
+                      <p className="mt-1 max-w-[580px] text-[11px] leading-[1.05rem] text-slate-400">
                         {activeDescriptor.connectKind === "oauth"
                           ? "Use your account login, then discover the models that are ready to add."
                           : activeDescriptor.connectKind === "local"
@@ -420,17 +421,20 @@ export function AddModelsDialog({
                             : "Connect the provider, review the discovered catalog, and add only the models you want."}
                       </p>
                     </div>
-                    <Badge variant={activeDraft.connection?.connected ? "success" : "muted"}>
+                    <Badge
+                      variant={activeDraft.connection?.connected ? "success" : "muted"}
+                      className="px-2 py-0.5 text-[10px] tracking-[0.12em]"
+                    >
                       {activeDraft.connection?.connected ? "Connected" : "Not connected"}
                     </Badge>
                   </div>
 
-                  <div className="mt-5 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap gap-1.5">
                     {buildProgressSteps(activeProviderId, activeDraft).map((step) => (
                       <div
                         key={step.label}
                         className={cn(
-                          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.18em]",
+                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em]",
                           step.status === "done"
                             ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
                             : step.status === "active"
@@ -440,7 +444,7 @@ export function AddModelsDialog({
                       >
                         <span
                           className={cn(
-                            "h-2 w-2 rounded-full",
+                            "h-1.5 w-1.5 rounded-full",
                             step.status === "done"
                               ? "bg-emerald-300"
                               : step.status === "active"
@@ -454,29 +458,29 @@ export function AddModelsDialog({
                   </div>
 
                   {activeDraft.statusMessage ? (
-                    <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.04] px-4 py-3">
-                      <p className="text-[13px] text-slate-200">{activeDraft.statusMessage}</p>
+                    <div className="mt-4 rounded-[18px] border border-white/10 bg-white/[0.04] px-3.5 py-2.5">
+                      <p className="text-[12px] text-slate-200">{activeDraft.statusMessage}</p>
                     </div>
                   ) : null}
 
                   {activeDraft.errorMessage ? (
-                    <div className="mt-4 rounded-[22px] border border-rose-400/20 bg-rose-400/[0.08] px-4 py-3 text-[13px] text-rose-100">
+                    <div className="mt-4 rounded-[18px] border border-rose-400/20 bg-rose-400/[0.08] px-3.5 py-2.5 text-[12px] text-rose-100">
                       {activeDraft.errorMessage}
                     </div>
                   ) : null}
 
                   {activeProviderId === "openai-codex" ? (
-                    <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="font-display text-[1rem] text-white">Connect your ChatGPT account</p>
-                          <p className="mt-1 max-w-[560px] text-[13px] leading-6 text-slate-400">
+                          <p className="font-display text-[0.95rem] text-white">Connect your ChatGPT account</p>
+                          <p className="mt-1 max-w-[540px] text-[11px] leading-[1.05rem] text-slate-400">
                             This uses OpenClaw&apos;s account-based login flow. No API key is required.
                           </p>
                         </div>
                         <Button
                           type="button"
-                          className="h-10 rounded-full px-5"
+                          className="h-9 rounded-full px-4 text-[11px]"
                           disabled={activeDraft.flowState === "connecting" && !activeDraft.manualCommand}
                           onClick={() => {
                             void connectProvider(activeProviderId);
@@ -494,11 +498,11 @@ export function AddModelsDialog({
                       </div>
 
                       {activeDraft.manualCommand ? (
-                        <div className="mt-5 rounded-[22px] border border-cyan-300/15 bg-cyan-300/[0.07] p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="mt-4 rounded-[18px] border border-cyan-300/15 bg-cyan-300/[0.07] p-3.5">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <p className="text-[13px] font-medium text-cyan-50">Finish sign-in in Terminal</p>
-                              <p className="mt-1 max-w-[560px] text-[12px] leading-6 text-cyan-100/80">
+                              <p className="text-[12px] font-medium text-cyan-50">Finish sign-in in Terminal</p>
+                              <p className="mt-1 max-w-[520px] text-[11px] leading-[1.05rem] text-cyan-100/80">
                                 Open Terminal, complete the provider login, then return here and check discovery.
                               </p>
                             </div>
@@ -507,7 +511,7 @@ export function AddModelsDialog({
                                 type="button"
                                 variant="secondary"
                                 size="sm"
-                                className="h-9 rounded-full px-3"
+                                className="h-8 rounded-full px-3 text-[11px]"
                                 disabled={isOpeningTerminal}
                                 onClick={() => {
                                   void openTerminal(activeDraft.manualCommand || "");
@@ -529,7 +533,7 @@ export function AddModelsDialog({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                className="h-9 rounded-full px-3"
+                                className="h-8 rounded-full px-3 text-[11px]"
                                 onClick={() => {
                                   void copyText(activeDraft.manualCommand || "");
                                 }}
@@ -541,7 +545,7 @@ export function AddModelsDialog({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                className="h-9 rounded-full px-3"
+                                className="h-8 rounded-full px-3 text-[11px]"
                                 onClick={() => {
                                   void discoverProvider(activeProviderId);
                                 }}
@@ -551,8 +555,8 @@ export function AddModelsDialog({
                               </Button>
                             </div>
                           </div>
-                          <div className="mt-4 overflow-x-auto rounded-[18px] border border-white/10 bg-slate-950/60 px-4 py-3">
-                            <code className="text-[12px] text-slate-200">{activeDraft.manualCommand}</code>
+                          <div className="mt-3.5 overflow-x-auto rounded-[16px] border border-white/10 bg-slate-950/60 px-3.5 py-2.5">
+                            <code className="text-[11px] text-slate-200">{activeDraft.manualCommand}</code>
                           </div>
                         </div>
                       ) : null}
@@ -560,10 +564,10 @@ export function AddModelsDialog({
                   ) : null}
 
                   {activeDescriptor.connectKind === "apiKey" ? (
-                    <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                    <div className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
                       <div className="flex flex-wrap items-end gap-3">
                         <div className="min-w-0 flex-1">
-                          <label className="block text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                          <label className="block text-[10px] uppercase tracking-[0.16em] text-slate-500">
                             API key
                           </label>
                           <Input
@@ -571,12 +575,12 @@ export function AddModelsDialog({
                             value={activeDraft.apiKey}
                             onChange={(event) => updateDraft(activeProviderId, { apiKey: event.target.value })}
                             placeholder={activeProviderId === "openrouter" ? "sk-or-v1-..." : "Paste API key"}
-                            className="mt-2"
+                            className="mt-2 h-9 text-[12px]"
                           />
                         </div>
                         <Button
                           type="button"
-                          className="h-11 rounded-full px-5"
+                          className="h-9 rounded-full px-4 text-[11px]"
                           disabled={activeDraft.flowState === "connecting" || !activeDraft.apiKey.trim()}
                           onClick={() => {
                             void connectProvider(activeProviderId);
@@ -596,12 +600,12 @@ export function AddModelsDialog({
                   ) : null}
 
                   {activeDescriptor.connectKind !== "oauth" ? (
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-3.5 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="secondary"
                         size="sm"
-                        className="h-9 rounded-full px-4"
+                        className="h-8 rounded-full px-3.5 text-[11px]"
                         disabled={activeDraft.flowState === "discovery-loading"}
                         onClick={() => {
                           void discoverProvider(activeProviderId);
@@ -620,7 +624,7 @@ export function AddModelsDialog({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-9 rounded-full px-4"
+                        className="h-8 rounded-full px-3.5 text-[11px]"
                         onClick={() => {
                           void runStatus(activeProviderId);
                         }}
@@ -664,9 +668,9 @@ export function AddModelsDialog({
                   ) : null}
 
                   {activeDraft.flowState === "add-success" ? (
-                    <div className="mt-5 flex items-center gap-3 rounded-[22px] border border-emerald-300/20 bg-emerald-300/[0.08] px-4 py-3">
+                    <div className="mt-4 flex items-center gap-3 rounded-[18px] border border-emerald-300/20 bg-emerald-300/[0.08] px-3.5 py-2.5">
                       <CircleCheckBig className="h-4 w-4 text-emerald-200" />
-                      <p className="text-[13px] text-emerald-50">
+                      <p className="text-[12px] text-emerald-50">
                         {activeDraft.statusMessage || "Models were added successfully."}
                       </p>
                     </div>
@@ -677,17 +681,17 @@ export function AddModelsDialog({
                       href={activeDraft.docsUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="mt-5 inline-flex text-[12px] text-slate-300 underline underline-offset-4"
+                      className="mt-4 inline-flex text-[11px] text-slate-300 underline underline-offset-4"
                     >
                       OpenClaw model docs
                     </a>
                   ) : null}
                 </>
               ) : (
-                <div className="flex min-h-[240px] items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-white/[0.02] px-6 py-8 text-center">
+                <div className="flex min-h-[210px] items-center justify-center rounded-[22px] border border-dashed border-white/10 bg-white/[0.02] px-5 py-7 text-center">
                   <div>
-                    <p className="font-display text-[1.05rem] text-white">Choose a provider to begin</p>
-                    <p className="mt-2 max-w-[420px] text-[13px] leading-6 text-slate-400">
+                    <p className="font-display text-[0.95rem] text-white">Choose a provider to begin</p>
+                    <p className="mt-2 max-w-[400px] text-[12px] leading-[1.05rem] text-slate-400">
                       Start with ChatGPT, OpenRouter, or Ollama Local. The flow will guide you through connect,
                       discovery, selection, and add.
                     </p>
@@ -710,23 +714,23 @@ function EmptyStateCard({
   onCopyCommand: (command: string) => void;
 }) {
   return (
-    <div className="mt-5 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-      <p className="font-display text-[1rem] text-white">{emptyState.title}</p>
-      <p className="mt-1 max-w-[620px] text-[13px] leading-6 text-slate-400">{emptyState.description}</p>
+    <div className="mt-4 rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+      <p className="font-display text-[0.95rem] text-white">{emptyState.title}</p>
+      <p className="mt-1 max-w-[580px] text-[12px] leading-[1.05rem] text-slate-400">{emptyState.description}</p>
 
       {emptyState.commands?.length ? (
         <div className="mt-4 space-y-2">
           {emptyState.commands.map((command) => (
             <div
               key={command}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-white/10 bg-slate-950/60 px-4 py-3"
+              className="flex flex-wrap items-center justify-between gap-2.5 rounded-[16px] border border-white/10 bg-slate-950/60 px-3.5 py-2.5"
             >
-              <code className="text-[12px] text-slate-200">{command}</code>
+              <code className="text-[11px] text-slate-200">{command}</code>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="h-8 rounded-full px-3"
+                className="h-8 rounded-full px-3 text-[11px]"
                 onClick={() => onCopyCommand(command)}
               >
                 <Copy className="mr-1.5 h-3.5 w-3.5" />
