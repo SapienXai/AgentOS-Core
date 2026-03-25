@@ -12,6 +12,7 @@ const isWindows = process.platform === "win32";
 let resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
 let npmGlobalPrefixPromise: Promise<string> | null = null;
+const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
 
 interface CommandOptions {
   timeoutMs?: number;
@@ -188,6 +189,10 @@ export async function detectOpenClaw(): Promise<boolean> {
   }
 }
 
+export function formatOpenClawCommand(command: string, args: string[]) {
+  return [command, ...args].map(quoteShellSegment).join(" ");
+}
+
 export async function resolveOpenClawBin(): Promise<string> {
   if (resolvedOpenClawBin) {
     return resolvedOpenClawBin;
@@ -294,6 +299,14 @@ function stringifyStream(value: unknown) {
   }
 
   return "";
+}
+
+function quoteShellSegment(value: string) {
+  if (shellSafeSegmentPattern.test(value)) {
+    return value;
+  }
+
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 async function collectOpenClawCandidates() {

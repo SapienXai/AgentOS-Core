@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
 import { ensureOpenClawRuntimeStateAccess, getMissionControlSnapshot } from "@/lib/openclaw/service";
 import type {
@@ -184,6 +185,31 @@ export async function POST(request: Request) {
 
       const openClawBin = await resolveOpenClawBin();
 
+      if (await needsGatewayRegistrationRepair(await readGatewayStatus(openClawBin))) {
+        await send({
+          type: "status",
+          phase: "installing-gateway",
+          message: "Repairing the gateway registration..."
+        });
+
+        const gatewayInstallResult = await runCommand(
+          openClawBin,
+          ["gateway", "install", "--force", "--json"],
+          send
+        );
+        appendOutput(gatewayInstallResult);
+
+        if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
+          await fail("installing-gateway", "Gateway installation failed.", {
+            exitCode: gatewayInstallResult.code,
+            manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--force", "--json"])
+          });
+          return;
+        }
+
+        snapshot = await getMissionControlSnapshot({ force: true });
+      }
+
       if (!snapshot.diagnostics.rpcOk) {
         await send({
           type: "status",
@@ -219,7 +245,7 @@ export async function POST(request: Request) {
             if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
               await fail("installing-gateway", "Gateway installation failed.", {
                 exitCode: gatewayInstallResult.code,
-                manualCommand: "openclaw gateway install --json"
+                manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--json"])
               });
               return;
             }
@@ -237,7 +263,7 @@ export async function POST(request: Request) {
           if (gatewayStartResult.errorMessage || gatewayStartResult.timedOut || gatewayStartResult.code !== 0) {
             await fail("starting-gateway", "Gateway failed to start.", {
               exitCode: gatewayStartResult.code,
-              manualCommand: "openclaw gateway start --json"
+              manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "start", "--json"])
             });
             return;
           }
@@ -286,8 +312,8 @@ export async function POST(request: Request) {
               : "OpenClaw did not become ready in time.",
             {
               manualCommand: gatewayModeBlocked
-                ? "openclaw config set gateway.mode local && openclaw gateway restart --json"
-                : "openclaw gateway status --json"
+                ? `${formatOpenClawCommand(openClawBin, ["config", "set", "gateway.mode", "local"])} && ${formatOpenClawCommand(openClawBin, ["gateway", "restart", "--json"])}`
+                : formatOpenClawCommand(openClawBin, ["gateway", "status", "--json"])
             }
           );
           return;
@@ -535,6 +561,48 @@ function needsGatewayModeLocalRepair(payload: GatewayStatusPayload | null) {
   return /gateway\.mode=local|current:\s*unset|allow-unconfigured/i.test(diagnosticText);
 }
 
+async function needsGatewayRegistrationRepair(payload: GatewayStatusPayload | null) {
+  if (!payload?.service?.loaded) {
+    return false;
+  }
+
+  const programArguments = payload.service.command?.programArguments;
+
+  if (!Array.isArray(programArguments) || programArguments.length < 2) {
+    return true;
+  }
+
+  const pathArguments = programArguments
+    .slice(0, 2)
+    .filter((value): value is string => typeof value === "string" && value.includes("/"));
+
+  if (pathArguments.length === 0) {
+    return false;
+  }
+
+  for (const candidate of pathArguments) {
+    if (!(await pathExists(candidate))) {
+      return true;
+    }
+  }
+
+  const diagnosticText = [payload.lastError, payload.rpc?.error].filter(Boolean).join("\n");
+
+  return (
+    payload.service.runtime?.status !== "running" &&
+    /cannot find module|command not found|explicit credentials|no such file or directory/i.test(diagnosticText)
+  );
+}
+
+async function pathExists(filePath: string) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 type GatewayCommandPayload = {
   result?: string;
   ok?: boolean;
@@ -545,6 +613,12 @@ type GatewayStatusPayload = {
   lastError?: string;
   service?: {
     loaded?: boolean;
+    command?: {
+      programArguments?: string[];
+    };
+    runtime?: {
+      status?: string;
+    };
   };
   rpc?: {
     ok?: boolean;

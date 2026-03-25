@@ -578,11 +578,26 @@ export function MissionSidebar({
                     </div>
                   </div>
 
-                  {snapshot.diagnostics.issues.length > 0 ? (
-                    <div className="mt-3 rounded-[16px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2 text-xs text-amber-100">
-                      {snapshot.diagnostics.issues[0]}
-                    </div>
-                  ) : null}
+                {snapshot.diagnostics.issues.length > 0 ? (
+                  <div className="mt-3 rounded-[16px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2 text-xs text-amber-100">
+                    {snapshot.diagnostics.issues[0]}
+                  </div>
+                ) : null}
+
+                {snapshot.diagnostics.health === "offline" ? (
+                  <div className="mt-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={onOpenModelSetup}
+                      className="h-8 w-full justify-center rounded-full border-amber-300/20 bg-amber-300/10 px-3 text-[11px] text-amber-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300/30 hover:bg-amber-300/16 hover:text-amber-50"
+                    >
+                      <Workflow className="mr-1.5 h-3.5 w-3.5" />
+                      Open setup
+                    </Button>
+                  </div>
+                ) : null}
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">

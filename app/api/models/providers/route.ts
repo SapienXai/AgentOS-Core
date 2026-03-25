@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getModelProviderDescriptor } from "@/lib/openclaw/model-provider-registry";
-import { runOpenClawJson } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resolveOpenClawBin, runOpenClawJson } from "@/lib/openclaw/cli";
 import { getMissionControlSnapshot } from "@/lib/openclaw/service";
 import type {
   AddModelsCatalogModel,
@@ -174,6 +174,7 @@ async function handleProviderAction(
   input: AddModelsProviderActionRequest
 ): Promise<AddModelsProviderActionResult> {
   const snapshot = await getMissionControlSnapshot({ force: true });
+  const commandBin = await resolveOpenClawBin().catch(() => "openclaw");
 
   if (input.action === "status") {
     const ollamaState = input.provider === "ollama" ? await readOllamaState() : null;
@@ -205,7 +206,14 @@ async function handleProviderAction(
         snapshot,
         connection: buildConnectionStatus(input.provider, snapshot, null),
         models: [],
-        manualCommand: "openclaw models auth login --provider openai-codex --set-default",
+        manualCommand: formatOpenClawCommand(commandBin, [
+          "models",
+          "auth",
+          "login",
+          "--provider",
+          "openai-codex",
+          "--set-default"
+        ]),
         docsUrl: addModelsDocsUrl
       });
     }

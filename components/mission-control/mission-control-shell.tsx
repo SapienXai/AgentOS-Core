@@ -11,6 +11,7 @@ import {
   Settings2,
   SunMedium
 } from "lucide-react";
+import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
@@ -2639,9 +2640,12 @@ function CanvasTopBar({
   onOpenUpdateDialog: () => void;
   onOpenResetDialog: (target: ResetTarget) => void;
 }) {
+  const health = snapshot.diagnostics.health;
   const isOpenClawReady = resolveOpenClawMissionReady(snapshot);
   const isGatewayControlRunning = gatewayControlAction !== null;
   const isModelActionRunning = modelOnboardingRunState === "running";
+  const isOffline = health === "offline";
+  const healthLabel = formatHealthLabel(health);
   const settingsSecondaryButtonStyles = settingsButtonClassName(surfaceTheme, "secondary");
   const settingsPrimaryButtonStyles = settingsButtonClassName(surfaceTheme, "primary");
   const settingsWarningButtonStyles = settingsButtonClassName(surfaceTheme, "warning");
@@ -2681,18 +2685,70 @@ function CanvasTopBar({
               v{snapshot.diagnostics.version || "unknown"}
             </span>
           </div>
-          <span
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.22em]",
-              statusBadgeClassName(snapshot.diagnostics.health, surfaceTheme)
-            )}
-          >
+          {isOffline ? (
+            <motion.button
+              type="button"
+              onClick={() => onOpenSetupWizard("system")}
+              title="System is offline. Open the setup wizard."
+              aria-label="System is offline. Open the setup wizard."
+              whileHover={{ scale: 1.03, y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ type: "spring", stiffness: 420, damping: 28 }}
+              className={cn(
+                "group relative inline-flex cursor-pointer select-none items-center gap-2 overflow-hidden rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.22em] transition-[background-color,border-color,color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
+                statusBadgeClassName(health, surfaceTheme),
+                surfaceTheme === "light"
+                  ? "shadow-[0_10px_24px_rgba(244,63,94,0.12)] hover:border-rose-300 hover:bg-rose-100 hover:text-rose-800"
+                  : "shadow-[0_10px_24px_rgba(244,63,94,0.18)] hover:border-rose-300/40 hover:bg-rose-300/15 hover:text-rose-100"
+              )}
+            >
+              <motion.span
+                aria-hidden="true"
+                className={cn(
+                  "pointer-events-none absolute inset-0 rounded-full",
+                  surfaceTheme === "light"
+                    ? "bg-[radial-gradient(circle_at_top,rgba(244,63,94,0.18),rgba(244,63,94,0))]"
+                    : "bg-[radial-gradient(circle_at_top,rgba(251,113,133,0.18),rgba(251,113,133,0))]"
+                )}
+                animate={{ opacity: [0.35, 0.65, 0.35], scale: [0.98, 1.02, 0.98] }}
+                transition={{ duration: 2.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+              />
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "relative z-10 h-2 w-2 rounded-full shadow-[0_0_12px_currentColor]",
+                  statusDotClassName(health)
+                )}
+              />
+              <span className="relative z-10 inline-flex items-center gap-1.5">
+                <span>{healthLabel}</span>
+                <span
+                  className={cn(
+                    "rounded-full border px-1.5 py-0.5 text-[7px] uppercase tracking-[0.18em]",
+                    surfaceTheme === "light"
+                      ? "border-rose-300/40 bg-rose-100/70 text-rose-800"
+                      : "border-rose-300/25 bg-rose-300/10 text-rose-100/90"
+                  )}
+                >
+                  Setup
+                </span>
+                <ArrowUpCircle className="h-3 w-3 opacity-80 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+              </span>
+            </motion.button>
+          ) : (
             <span
-              aria-hidden="true"
-              className={cn("h-2 w-2 rounded-full shadow-[0_0_12px_currentColor]", statusDotClassName(snapshot.diagnostics.health))}
-            />
-            {formatHealthLabel(snapshot.diagnostics.health)}
-          </span>
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.22em]",
+                statusBadgeClassName(health, surfaceTheme)
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn("h-2 w-2 rounded-full shadow-[0_0_12px_currentColor]", statusDotClassName(health))}
+              />
+              {healthLabel}
+            </span>
+          )}
           <button
             type="button"
             role="switch"

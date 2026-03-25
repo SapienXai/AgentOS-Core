@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { resolveOpenClawBin } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import {
   isOpenClawMissionReady,
   isOpenClawSystemReady
@@ -91,6 +91,7 @@ export async function POST(request: Request) {
   void (async () => {
     let aggregatedStdout = "";
     let aggregatedStderr = "";
+    let manualCommandBin = "openclaw";
 
     const appendOutput = (result: CommandResult) => {
       aggregatedStdout += result.stdout;
@@ -138,12 +139,11 @@ export async function POST(request: Request) {
       const snapshot = await getMissionControlSnapshot({ force: true });
 
       if (!isModelReady(snapshot)) {
-        const failure = resolveVerificationFailure(snapshot, preferredModelId);
+        const failure = resolveVerificationFailure(snapshot, preferredModelId, manualCommandBin);
 
         await fail("verifying", failure.message || message, {
           snapshot,
-          manualCommand:
-            manualCommand ?? failure.manualCommand ?? buildModelManualCommand(snapshot, preferredModelId),
+          manualCommand: manualCommand ?? failure.manualCommand ?? buildModelManualCommand(snapshot, preferredModelId, manualCommandBin),
           docsUrl
         });
         return null;
@@ -170,7 +170,7 @@ export async function POST(request: Request) {
             : "Mission Control could not verify a real agent turn yet.",
           {
             snapshot: freshSnapshot,
-            manualCommand: manualCommand ?? buildModelManualCommand(freshSnapshot, preferredModelId),
+            manualCommand: manualCommand ?? buildModelManualCommand(freshSnapshot, preferredModelId, manualCommandBin),
             docsUrl
           }
         );
@@ -209,11 +209,12 @@ export async function POST(request: Request) {
       });
 
       let snapshot = await getMissionControlSnapshot({ force: true });
+      manualCommandBin = await resolveOpenClawBin().catch(() => "openclaw");
 
       if (!isSystemReady(snapshot)) {
         await fail("detecting", "System setup is not complete yet.", {
           snapshot,
-          manualCommand: "openclaw gateway status --json"
+          manualCommand: formatOpenClawCommand(manualCommandBin, ["gateway", "status", "--json"])
         });
         return;
       }
@@ -236,7 +237,7 @@ export async function POST(request: Request) {
 
         await fail("refreshing", "Model setup still needs attention.", {
           snapshot,
-          manualCommand: buildModelManualCommand(snapshot),
+          manualCommand: buildModelManualCommand(snapshot, undefined, manualCommandBin),
           docsUrl
         });
         return;
@@ -261,7 +262,14 @@ export async function POST(request: Request) {
         if (result.errorMessage || result.timedOut || result.code !== 0) {
           await fail("discovering", "OpenClaw could not discover remote models.", {
             exitCode: result.code,
-            manualCommand: "openclaw models scan --json --yes --no-input --no-probe",
+            manualCommand: formatOpenClawCommand(openClawBin, [
+              "models",
+              "scan",
+              "--json",
+              "--yes",
+              "--no-input",
+              "--no-probe"
+            ]),
             docsUrl
           });
           return;
@@ -303,7 +311,7 @@ export async function POST(request: Request) {
         if (result.errorMessage || result.timedOut || result.code !== 0) {
           await fail("configuring-default", "OpenClaw could not set the default model.", {
             exitCode: result.code,
-            manualCommand: `openclaw models set ${modelId}`,
+            manualCommand: formatOpenClawCommand(openClawBin, ["models", "set", modelId]),
             docsUrl
           });
           return false;
@@ -313,7 +321,7 @@ export async function POST(request: Request) {
       };
 
       const runProviderLogin = async (provider: string) => {
-        const authHandoff = resolveProviderAuthHandoff(provider);
+        const authHandoff = resolveProviderAuthHandoff(provider, openClawBin);
 
         await send({
           type: "status",
@@ -538,21 +546,25 @@ function isModelReady(snapshot: MissionControlSnapshot) {
   return isSystemReady(snapshot) && snapshot.diagnostics.modelReadiness.ready;
 }
 
-function buildModelManualCommand(snapshot: MissionControlSnapshot, preferredModelId?: string | null) {
+function buildModelManualCommand(
+  snapshot: MissionControlSnapshot,
+  preferredModelId?: string | null,
+  commandBin?: string
+) {
   const provider = resolveRequiredLoginProvider(snapshot, preferredModelId);
 
   if (provider) {
-    return resolveProviderAuthHandoff(provider).command;
+    return resolveProviderAuthHandoff(provider, commandBin).command;
   }
 
   const recommendedModelId =
     preferredModelId?.trim() || snapshot.diagnostics.modelReadiness.recommendedModelId;
 
   if (recommendedModelId) {
-    return `openclaw models set ${recommendedModelId}`;
+    return formatOpenClawCommand(commandBin || "openclaw", ["models", "set", recommendedModelId]);
   }
 
-  return "openclaw models status --json";
+  return formatOpenClawCommand(commandBin || "openclaw", ["models", "status", "--json"]);
 }
 
 function resolveRequiredLoginProvider(
@@ -574,11 +586,15 @@ function resolveRequiredLoginProvider(
   return snapshot.diagnostics.modelReadiness.preferredLoginProvider;
 }
 
-function resolveVerificationFailure(snapshot: MissionControlSnapshot, preferredModelId?: string | null) {
+function resolveVerificationFailure(
+  snapshot: MissionControlSnapshot,
+  preferredModelId?: string | null,
+  commandBin?: string
+) {
   const provider = resolveRequiredLoginProvider(snapshot, preferredModelId);
 
   if (provider) {
-    const authHandoff = resolveProviderAuthHandoff(provider);
+    const authHandoff = resolveProviderAuthHandoff(provider, commandBin);
 
     return {
       message: authHandoff.verificationMessage,
@@ -590,7 +606,7 @@ function resolveVerificationFailure(snapshot: MissionControlSnapshot, preferredM
     message: snapshot.diagnostics.modelReadiness.defaultModel
       ? "The default model is set, but Mission Control still cannot verify it yet."
       : "Choose a default model to finish setup.",
-    manualCommand: buildModelManualCommand(snapshot, preferredModelId)
+    manualCommand: buildModelManualCommand(snapshot, preferredModelId, commandBin)
   };
 }
 
@@ -662,13 +678,14 @@ function formatProviderLabel(provider: string) {
     .join(" ");
 }
 
-function resolveProviderAuthHandoff(provider: string) {
+function resolveProviderAuthHandoff(provider: string, commandBin?: string) {
   const normalized = provider.trim().toLowerCase();
   const label = formatProviderLabel(provider);
+  const bin = commandBin || "openclaw";
 
   if (normalized === "openrouter") {
     return {
-      command: "openclaw models auth paste-token --provider openrouter",
+      command: formatOpenClawCommand(bin, ["models", "auth", "paste-token", "--provider", "openrouter"]),
       statusMessage: `Preparing ${label} API key setup in terminal...`,
       continueMessage: `Continue in terminal to paste your ${label} API key. After auth completes, return here and refresh setup.`,
       verificationMessage: `The model was saved. Continue in terminal to paste your ${label} API key and finish setup.`
@@ -676,7 +693,7 @@ function resolveProviderAuthHandoff(provider: string) {
   }
 
   return {
-    command: `openclaw models auth login --provider ${normalized} --set-default`,
+    command: formatOpenClawCommand(bin, ["models", "auth", "login", "--provider", normalized, "--set-default"]),
     statusMessage: `Preparing ${label} auth in terminal...`,
     continueMessage: `Continue in terminal to connect ${label}. After auth completes, return here and refresh setup.`,
     verificationMessage: `The model was saved. Continue in terminal to connect ${label} and finish setup.`
