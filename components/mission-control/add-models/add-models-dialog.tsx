@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useState } from "react";
-import {
-  ChevronDown,
-  CircleCheckBig,
-  Copy,
-  LoaderCircle,
-  RefreshCw,
-  SquareTerminal
-} from "lucide-react";
+import { CircleCheckBig, Copy, LoaderCircle, RefreshCw, SquareTerminal } from "lucide-react";
 
 import { ModelPicker } from "@/components/mission-control/add-models/model-picker";
 import { ProviderCard } from "@/components/mission-control/add-models/provider-card";
@@ -23,8 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
-  otherModelProviders,
-  primaryModelProviders,
+  modelProviderRegistry,
   getModelProviderDescriptor,
   isAddModelsProviderId,
   normalizeAddModelsProviderId
@@ -87,7 +79,6 @@ export function AddModelsDialog({
 }) {
   const normalizedInitialProvider = normalizeAddModelsProviderId(initialProvider);
   const [activeProvider, setActiveProvider] = useState<AddModelsProviderId | null>(normalizedInitialProvider);
-  const [otherProvidersOpen, setOtherProvidersOpen] = useState(false);
   const [providerDrafts, setProviderDrafts] = useState<Partial<Record<AddModelsProviderId, ProviderDraft>>>({});
   const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
   const handleInitialProviderOpen = useEffectEvent((providerId: AddModelsProviderId) => {
@@ -352,59 +343,37 @@ export function AddModelsDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
-            <div className="grid gap-3 lg:grid-cols-3">
-              {primaryModelProviders.map((provider) => (
-                <ProviderCard
-                  key={provider.id}
-                  descriptor={provider}
-                  active={activeProviderId === provider.id}
-                  compact
-                  connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
-                  detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
-                  onClick={() => {
-                    void selectProvider(provider.id);
-                  }}
-                />
-              ))}
-            </div>
-
-            <div className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(13,20,34,0.94),rgba(9,13,24,0.96))]">
-              <button
-                type="button"
-                onClick={() => setOtherProvidersOpen((current) => !current)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-              >
+            <div className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(13,20,34,0.94),rgba(9,13,24,0.96))] p-4">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-display text-[0.9rem] text-white">Other providers</p>
+                  <p className="font-display text-[0.9rem] text-white">All providers</p>
                   <p className="mt-1 text-[10px] leading-[1.05rem] text-slate-400">
-                    Simpler API-key setup for additional provider routes.
+                    Scroll right to browse the full provider catalog.
                   </p>
                 </div>
-                <ChevronDown
-                  className={cn(
-                    "h-3.5 w-3.5 text-slate-400 transition-transform",
-                    otherProvidersOpen ? "rotate-180" : "rotate-0"
-                  )}
-                />
-              </button>
+                <Badge variant="muted" className="px-2 py-0.5 text-[10px] tracking-[0.12em]">
+                  {modelProviderRegistry.length} total
+                </Badge>
+              </div>
 
-              {otherProvidersOpen ? (
-                <div className="grid gap-2.5 border-t border-white/10 px-3.5 py-3.5 md:grid-cols-2 xl:grid-cols-3">
-                  {otherModelProviders.map((provider) => (
-                    <ProviderCard
-                      key={provider.id}
-                      descriptor={provider}
-                      active={activeProviderId === provider.id}
-                      compact
-                      connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
-                      detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
-                      onClick={() => {
-                        void selectProvider(provider.id);
-                      }}
-                    />
+              <div className="mt-3 -mx-1 overflow-x-auto overscroll-x-contain pb-1">
+                <div className="flex min-w-max gap-3 px-1">
+                  {modelProviderRegistry.map((provider) => (
+                    <div key={provider.id} className="w-[260px] shrink-0 snap-start sm:w-[270px]">
+                      <ProviderCard
+                        descriptor={provider}
+                        active={activeProviderId === provider.id}
+                        compact
+                        connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
+                        detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
+                        onClick={() => {
+                          void selectProvider(provider.id);
+                        }}
+                      />
+                    </div>
                   ))}
                 </div>
-              ) : null}
+              </div>
             </div>
 
             <div className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,32,0.96),rgba(6,10,18,0.98))] p-4">
