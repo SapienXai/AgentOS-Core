@@ -18,12 +18,12 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
-import { MissionCanvas } from "@/components/mission-control/canvas";
 import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
 import { ResetDialog } from "@/components/mission-control/reset-dialog";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
+import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
 import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import dynamic from "next/dynamic";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
 import { compactPath } from "@/lib/openclaw/presenters";
@@ -61,6 +62,14 @@ import type {
 } from "@/lib/openclaw/types";
 import { normalizeAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { cn } from "@/lib/utils";
+
+const MissionCanvasView = dynamic(
+  () => import("@/components/mission-control/canvas").then((mod) => mod.MissionCanvas),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full" />
+  }
+);
 
 type ComposeIntent = {
   id: string;
@@ -116,6 +125,8 @@ export function MissionControlShell({
     initialSnapshot.workspaces[0]?.id ?? null
   );
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
+  const [composerTargetAgentId, setComposerTargetAgentId] = useState<string | null>(null);
+  const [isComposerActive, setIsComposerActive] = useState(false);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTabId>("overview");
   const [lastMission, setLastMission] = useState<MissionResponse | null>(null);
   const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
@@ -181,12 +192,25 @@ export function MissionControlShell({
   const [isWorkspaceWizardOpen, setIsWorkspaceWizardOpen] = useState(false);
   const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
   const [workspaceWizardEditId, setWorkspaceWizardEditId] = useState<string | null>(null);
+  const [isWorkspaceChannelsOpen, setIsWorkspaceChannelsOpen] = useState(false);
   const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
   const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
   const uiSnapshot = useMemo(
     () => mergeSnapshotWithOptimisticTasks(snapshot, optimisticMissionTasks),
     [snapshot, optimisticMissionTasks]
+  );
+  const safeHiddenRuntimeIds = useMemo(
+    () => (Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : []),
+    [hiddenRuntimeIds]
+  );
+  const safeHiddenTaskKeys = useMemo(
+    () => (Array.isArray(hiddenTaskKeys) ? hiddenTaskKeys : []),
+    [hiddenTaskKeys]
+  );
+  const safeLockedTaskKeys = useMemo(
+    () => (Array.isArray(lockedTaskKeys) ? lockedTaskKeys : []),
+    [lockedTaskKeys]
   );
 
   const selectNode = useCallback((nodeId: string | null, tab: InspectorTabId = "overview") => {
@@ -223,19 +247,19 @@ export function MissionControlShell({
     (task) => !activeWorkspaceId || task.workspaceId === activeWorkspaceId
   );
   const hiddenScopedTaskCount = scopedTasks.filter((task) =>
-    isTaskHiddenByPreferences(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
+    isTaskHiddenByPreferences(task, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys)
   ).length;
   const toggleWorkspaceTaskCards = useCallback(
     (workspaceId: string) => {
       const workspaceTasks = uiSnapshot.tasks.filter((task) => task.workspaceId === workspaceId);
-      const toggleableTasks = workspaceTasks.filter((task) => !lockedTaskKeys.includes(task.key));
+      const toggleableTasks = workspaceTasks.filter((task) => !safeLockedTaskKeys.includes(task.key));
 
       if (toggleableTasks.length === 0) {
         return;
       }
 
       const workspaceTaskCardsHidden = toggleableTasks.every((task) =>
-        isTaskHiddenByPreferences(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
+        isTaskHiddenByPreferences(task, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys)
       );
       const workspaceTaskKeys = new Set(toggleableTasks.map((task) => task.key));
       const workspaceRuntimeIds = new Set(toggleableTasks.flatMap((task) => task.runtimeIds));
@@ -251,7 +275,7 @@ export function MissionControlShell({
         Array.from(new Set([...current, ...workspaceRuntimeIds]))
       );
     },
-    [uiSnapshot.tasks, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys]
+    [uiSnapshot.tasks, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys]
   );
 
   const handleFocusAgent = useCallback(
@@ -293,6 +317,10 @@ export function MissionControlShell({
       setWorkspaceWizardEditId(null);
       setWorkspaceWizardInitialMode("basic");
     }
+  }, []);
+
+  const openWorkspaceChannels = useCallback(() => {
+    setIsWorkspaceChannelsOpen(true);
   }, []);
 
   useEffect(() => {
@@ -347,13 +375,14 @@ export function MissionControlShell({
   useEffect(() => {
     const selectedTask = uiSnapshot.tasks.find((task) => task.id === selectedNodeId);
     const taskHidden =
-      selectedTask && isTaskHiddenByPreferences(selectedTask, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys);
+      selectedTask &&
+      isTaskHiddenByPreferences(selectedTask, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys);
 
     if (!selectedNodeId) {
       return;
     }
 
-    if (focusedAgentId) {
+    if (focusedAgentId && !isComposerActive) {
       const selectionVisibleInFocus =
         selectedNodeId === focusedAgentId || selectedTask?.primaryAgentId === focusedAgentId;
 
@@ -363,15 +392,16 @@ export function MissionControlShell({
       return;
     }
 
-    if (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden) {
+    if (safeHiddenRuntimeIds.includes(selectedNodeId) || taskHidden) {
       selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
   }, [
     selectedNodeId,
     focusedAgentId,
-    hiddenRuntimeIds,
-    hiddenTaskKeys,
-    lockedTaskKeys,
+    isComposerActive,
+    safeHiddenRuntimeIds,
+    safeHiddenTaskKeys,
+    safeLockedTaskKeys,
     activeWorkspaceId,
     uiSnapshot.workspaces,
     uiSnapshot.tasks,
@@ -1595,11 +1625,13 @@ export function MissionControlShell({
       <div className="mission-canvas-backdrop absolute inset-0 z-0">
         <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
         <div className="absolute inset-0 z-10">
-          <MissionCanvas
+          <MissionCanvasView
             snapshot={uiSnapshot}
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
             focusedAgentId={focusedAgentId}
+            composerTargetAgentId={composerTargetAgentId}
+            isComposerActive={isComposerActive}
             recentDispatchId={recentDispatchId}
             hiddenRuntimeIds={hiddenRuntimeIds}
             hiddenTaskKeys={hiddenTaskKeys}
@@ -1655,7 +1687,7 @@ export function MissionControlShell({
               }
             }}
             onHideTask={(task) => {
-              if (lockedTaskKeys.includes(task.key)) {
+              if (safeLockedTaskKeys.includes(task.key)) {
                 return;
               }
 
@@ -1674,11 +1706,13 @@ export function MissionControlShell({
             }}
             onToggleTaskLock={(task) => {
               setLockedTaskKeys((current) => {
-                if (current.includes(task.key)) {
-                  return current.filter((key) => key !== task.key);
+                const safeCurrent = Array.isArray(current) ? current : [];
+
+                if (safeCurrent.includes(task.key)) {
+                  return safeCurrent.filter((key) => key !== task.key);
                 }
 
-                return [...current, task.key];
+                return [...safeCurrent, task.key];
               });
             }}
             onAbortTask={(task) => {
@@ -1789,6 +1823,7 @@ export function MissionControlShell({
             onOpenModelSetup={() => openSetupWizard(isOpenClawSystemReady ? "models" : "system")}
             onOpenAddModels={openAddModelsDialog}
             onEditWorkspace={openWorkspaceWizardForEdit}
+            onSnapshotChange={setSnapshot}
           />
         </div>
 
@@ -1846,10 +1881,13 @@ export function MissionControlShell({
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
+            onTargetAgentChange={setComposerTargetAgentId}
+            onComposerActiveChange={setIsComposerActive}
             onRefresh={refresh}
             onOpenWorkspaceCreate={() => {
               openWorkspaceWizard("basic");
             }}
+            onOpenWorkspaceChannels={openWorkspaceChannels}
             onMissionDispatchStart={(event) => {
               missionDispatchAbortControllersRef.current.set(event.requestId, event.abortController);
 
@@ -1943,6 +1981,15 @@ export function MissionControlShell({
             }}
           />
         </div>
+
+        <WorkspaceChannelsDialog
+          snapshot={uiSnapshot}
+          workspaceId={activeWorkspaceId ?? uiSnapshot.workspaces[0]?.id ?? null}
+          open={isWorkspaceChannelsOpen}
+          onOpenChange={setIsWorkspaceChannelsOpen}
+          onRefresh={refresh}
+          onSnapshotChange={setSnapshot}
+        />
 
         {shouldShowOnboarding ? (
           <OpenClawOnboarding
@@ -3630,11 +3677,15 @@ function isTaskHiddenByPreferences(
   hiddenTaskKeys: string[],
   lockedTaskKeys: string[]
 ) {
-  if (lockedTaskKeys.includes(task.key)) {
+  const safeHiddenRuntimeIds = Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : [];
+  const safeHiddenTaskKeys = Array.isArray(hiddenTaskKeys) ? hiddenTaskKeys : [];
+  const safeLockedTaskKeys = Array.isArray(lockedTaskKeys) ? lockedTaskKeys : [];
+
+  if (safeLockedTaskKeys.includes(task.key)) {
     return false;
   }
 
-  if (hiddenTaskKeys.includes(task.key)) {
+  if (safeHiddenTaskKeys.includes(task.key)) {
     return true;
   }
 
@@ -3642,7 +3693,7 @@ function isTaskHiddenByPreferences(
     return false;
   }
 
-  return task.runtimeIds.every((runtimeId) => hiddenRuntimeIds.includes(runtimeId));
+  return task.runtimeIds.every((runtimeId) => safeHiddenRuntimeIds.includes(runtimeId));
 }
 
 function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {

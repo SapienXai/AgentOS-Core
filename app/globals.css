@@ -310,6 +310,90 @@
   stroke: none;
 }
 
+.agent-node__composer-glow {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.16), transparent 60%),
+    radial-gradient(circle at 50% 50%, rgba(56, 189, 248, 0.08), transparent 42%);
+  filter: blur(16px);
+  opacity: 0.52;
+  transform-origin: center;
+  animation: agent-composer-pulse 3.2s ease-in-out infinite;
+}
+
+.agent-node__composer-svg {
+  mix-blend-mode: screen;
+  opacity: 1;
+}
+
+.agent-node__composer-rail {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke: rgba(125, 211, 252, 0.16);
+  stroke-width: 1.35;
+  opacity: 0.9;
+}
+
+.agent-node__composer-trace {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.agent-node__composer-trace--glow {
+  stroke: rgba(34, 211, 238, 0.34);
+  opacity: 0.72;
+  stroke-width: 8;
+  stroke-dasharray: 20 80;
+  animation: agent-composer-trace 1.85s linear infinite;
+  filter: blur(8px);
+}
+
+.agent-node__composer-trace--core {
+  stroke: rgba(186, 230, 253, 0.98);
+  stroke-width: 2.4;
+  stroke-dasharray: 7 93;
+  animation: agent-composer-trace 1.85s linear infinite;
+  filter:
+    drop-shadow(0 0 10px rgba(103, 232, 249, 0.9))
+    drop-shadow(0 0 20px rgba(34, 211, 238, 0.34))
+    drop-shadow(0 0 30px rgba(59, 130, 246, 0.16));
+}
+
+.agent-node__composer-trace--tail {
+  stroke: rgba(103, 232, 249, 0.48);
+  opacity: 0.88;
+  stroke-width: 4.2;
+  stroke-dasharray: 14 86;
+  animation: agent-composer-trace 1.85s linear infinite;
+  animation-delay: -0.08s;
+  filter: blur(2.2px);
+}
+
+.agent-node__composer-svg,
+.agent-node__composer-trace {
+  mix-blend-mode: screen;
+}
+
+.mission-shell .react-flow__edge .mission-edge__path--composer {
+  stroke: var(--mission-edge-core-active);
+  opacity: 1;
+  filter: drop-shadow(0 0 18px var(--mission-edge-glow-active));
+}
+
+.mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--glow {
+  opacity: 1;
+  filter: drop-shadow(0 0 20px var(--mission-edge-glow-active));
+}
+
+.mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--core {
+  stroke: var(--mission-edge-core-active);
+}
+
+.mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--animated {
+  filter: drop-shadow(0 0 24px var(--mission-edge-glow-active));
+}
+
 .mission-shell--light .workspace-node__health {
   border-width: 1px;
   color: #8a7261;
@@ -401,4 +485,54 @@
   animation-name: operation-progress-fill;
   animation-timing-function: linear;
   animation-fill-mode: forwards;
+}
+
+@keyframes agent-composer-trace {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes agent-composer-pulse {
+  0%,
+  100% {
+    opacity: 0.46;
+    transform: scale(0.985);
+  }
+
+  50% {
+    opacity: 0.82;
+    transform: scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-node__composer-glow {
+    animation: none !important;
+  }
+
+  .agent-node__composer-svg,
+  .agent-node__composer-trace {
+    animation: none !important;
+  }
+
+  .agent-node__composer-trace--core {
+    stroke-dasharray: 18 82;
+    stroke-dashoffset: 0;
+  }
+
+  .mission-shell .react-flow__edge .mission-edge__packet {
+    display: none !important;
+  }
+
+  .mission-shell .react-flow__edge .mission-edge__path--composer,
+  .mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--glow,
+  .mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--core,
+  .mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--animated {
+    filter: drop-shadow(0 0 14px var(--mission-edge-glow-active));
+  }
 }

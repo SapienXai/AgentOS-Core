@@ -166,6 +166,41 @@ export interface WorkspaceProject {
   health: AgentStatus;
   bootstrap: WorkspaceBootstrapState;
   capabilities: WorkspaceCapabilityState;
+  channels: WorkspaceChannelSummary[];
+}
+
+export interface WorkspaceChannelGroupAssignment {
+  chatId: string;
+  agentId: string | null;
+  title?: string | null;
+  enabled: boolean;
+}
+
+export interface WorkspaceChannelWorkspaceBinding {
+  workspaceId: string;
+  workspacePath: string;
+  agentIds: string[];
+  groupAssignments: WorkspaceChannelGroupAssignment[];
+}
+
+export interface WorkspaceChannelSummary {
+  id: string;
+  type: PlannerChannelType;
+  name: string;
+  primaryAgentId: string | null;
+  workspaces: WorkspaceChannelWorkspaceBinding[];
+}
+
+export interface ChannelRegistry {
+  version: 1;
+  channels: WorkspaceChannelSummary[];
+}
+
+export interface ChannelAccountRecord {
+  id: string;
+  type: PlannerChannelType;
+  name: string;
+  enabled: boolean;
 }
 
 export interface OpenClawAgent {
@@ -374,6 +409,7 @@ export interface MissionControlSnapshot {
   mode: "live" | "fallback";
   diagnostics: GatewayDiagnostics;
   presence: PresenceRecord[];
+  channelAccounts: ChannelAccountRecord[];
   workspaces: WorkspaceProject[];
   agents: OpenClawAgent[];
   models: ModelRecord[];
@@ -381,6 +417,7 @@ export interface MissionControlSnapshot {
   tasks: TaskRecord[];
   relationships: RelationshipRecord[];
   missionPresets: string[];
+  channelRegistry: ChannelRegistry;
 }
 
 export interface MissionSubmission {
@@ -664,6 +701,7 @@ export interface WorkspaceAgentBlueprintInput {
   isPrimary?: boolean;
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
+  channelIds?: string[];
 }
 
 export interface WorkspaceCreateInput {
@@ -883,6 +921,7 @@ export interface PlannerPersistentAgentSpec {
   heartbeat: AgentHeartbeatInput;
   responsibilities: string[];
   outputs: string[];
+  channelIds: string[];
 }
 
 export interface PlannerWorkflowSpec {
@@ -915,6 +954,10 @@ export interface PlannerChannelSpec {
   enabled: boolean;
   announce: boolean;
   requiresCredentials: boolean;
+  accountId?: string;
+  primaryAgentId?: string | null;
+  allowedChatIds?: string[];
+  groupAssignments?: WorkspaceChannelGroupAssignment[];
   credentials: PlannerChannelCredentialField[];
 }
 
@@ -1055,6 +1098,7 @@ export interface AgentCreateInput {
   avatar?: string;
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
+  channelIds?: string[];
 }
 
 export interface AgentUpdateInput {
@@ -1068,6 +1112,7 @@ export interface AgentUpdateInput {
   avatar?: string;
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
+  channelIds?: string[];
 }
 
 export interface AgentDeleteInput {

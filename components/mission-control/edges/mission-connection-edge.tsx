@@ -1,9 +1,12 @@
 "use client";
 
-import { BaseEdge, type EdgeProps, getSimpleBezierPath } from "@xyflow/react";
+import { BaseEdge, type Edge, type EdgeProps, getSimpleBezierPath } from "@xyflow/react";
 import type { CSSProperties } from "react";
 
+import type { MissionEdgeData } from "@/components/mission-control/canvas-types";
 import { cn } from "@/lib/utils";
+
+type MissionEdge = Edge<MissionEdgeData, "simplebezier">;
 
 export function MissionConnectionEdge({
   id,
@@ -14,11 +17,12 @@ export function MissionConnectionEdge({
   targetY,
   targetPosition,
   style,
+  data,
   selected,
   animated,
   markerEnd,
   interactionWidth = 28
-}: EdgeProps) {
+}: EdgeProps<MissionEdge>) {
   const [edgePath] = getSimpleBezierPath({
     sourceX,
     sourceY,
@@ -28,10 +32,19 @@ export function MissionConnectionEdge({
     targetPosition
   });
 
-  const strokeWidth = resolveStrokeWidth(style?.strokeWidth, Boolean(animated));
-  const glowStrokeWidth = strokeWidth + 4;
+  const composerFocused = Boolean(data?.composerFocused);
+  const edgeActive = Boolean(animated) || composerFocused;
+  const strokeWidth = resolveStrokeWidth(style?.strokeWidth, edgeActive);
+  const glowStrokeWidth = strokeWidth + (composerFocused ? 5 : 4);
   const motionPathId = `mission-edge-motion-${sanitizeDomId(id)}`;
-  const packetSpecs = animated
+  const packetSpecs = composerFocused
+    ? [
+        { size: 5.2, halo: 9.2, duration: 1.95, delay: 0, alpha: 1 },
+        { size: 3.8, halo: 7.2, duration: 2.3, delay: 0.58, alpha: 0.92 },
+        { size: 2.8, halo: 5.8, duration: 2.05, delay: 1.12, alpha: 0.88 },
+        { size: 2.1, halo: 4.8, duration: 2.7, delay: 1.82, alpha: 0.82 }
+      ]
+    : edgeActive
     ? [
         { size: 4.6, halo: 8.4, duration: 2.4, delay: 0, alpha: 0.96 },
         { size: 3.2, halo: 6.4, duration: 2.95, delay: 0.78, alpha: 0.86 },
@@ -61,7 +74,8 @@ export function MissionConnectionEdge({
         path={edgePath}
         className={cn(
           "mission-edge__path mission-edge__path--glow",
-          animated && "mission-edge__path--animated",
+          edgeActive && "mission-edge__path--animated",
+          composerFocused && "mission-edge__path--composer",
           selected && "mission-edge__path--selected"
         )}
         interactionWidth={0}
@@ -71,14 +85,15 @@ export function MissionConnectionEdge({
         path={edgePath}
         className={cn(
           "mission-edge__path mission-edge__path--core",
-          animated && "mission-edge__path--animated",
+          edgeActive && "mission-edge__path--animated",
+          composerFocused && "mission-edge__path--composer",
           selected && "mission-edge__path--selected"
         )}
         interactionWidth={interactionWidth}
         markerEnd={markerEnd}
         style={coreStyle}
       />
-      {animated ? (
+      {edgeActive ? (
         <path
           id={motionPathId}
           d={edgePath}

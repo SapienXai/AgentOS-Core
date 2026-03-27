@@ -86,11 +86,17 @@ import type {
   WorkspaceCreateInput,
   WorkspaceEditSeed,
   WorkspaceModelProfile,
+  WorkspaceChannelSummary,
   WorkspaceSourceMode,
   WorkspaceTeamPreset,
   WorkspaceTemplate,
   WorkspaceUpdateInput,
-  WorkspaceProject
+  WorkspaceProject,
+  PlannerChannelType,
+  ChannelRegistry,
+  ChannelAccountRecord,
+  WorkspaceChannelGroupAssignment,
+  WorkspaceChannelWorkspaceBinding
 } from "@/lib/openclaw/types";
 
 const execFileAsync = promisify(execFile);
@@ -196,6 +202,7 @@ type AgentConfigPayload = Array<{
 const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
 const missionControlRootPath = path.join(process.cwd(), ".mission-control");
 const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
+const channelRegistryPath = path.join(missionControlRootPath, "channel-registry.json");
 const missionDispatchesRootPath = path.join(missionControlRootPath, "dispatches");
 const missionDispatchRunnerPath = path.join(process.cwd(), "scripts", "openclaw-mission-dispatch-runner.mjs");
 const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
@@ -362,6 +369,7 @@ type WorkspaceProjectManifestAgent = {
   policy: AgentPolicy | null;
   emoji: string | null;
   theme: string | null;
+  channelIds: string[];
 };
 type WorkspaceProjectManifest = {
   name: string | null;
@@ -375,6 +383,7 @@ type WorkspaceProjectManifest = {
   hidden: boolean;
   systemTag: string | null;
   agents: WorkspaceProjectManifestAgent[];
+  channels: WorkspaceChannelSummary[];
 };
 type SessionTranscriptEntry = {
   type?: string;
@@ -582,6 +591,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       agentsList.map((agent) => agent.id),
       settings
     );
+    const channelRegistry = await readChannelRegistry();
+    const channelAccounts = await readChannelAccounts();
 
     const workspaceByPath = new Map<string, WorkspaceProject>();
     const profileByWorkspace = new Map<string, AgentBootstrapProfile>();
@@ -889,6 +900,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       generatedAt,
       mode: "live" as const,
       diagnostics,
+      channelAccounts,
+      channelRegistry,
       presence: presence.map((entry) => ({
         host: entry.host,
         ip: entry.ip,
@@ -3065,10 +3078,18 @@ export async function createAgent(input: AgentCreateInput) {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const resolvedWorkspacePath =
+  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
+  let resolvedWorkspacePath =
     normalizeOptionalValue(input.workspacePath) ??
     snapshot.workspaces.find((entry) => entry.id === input.workspaceId)?.path;
+
+  if (!resolvedWorkspacePath) {
+    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    resolvedWorkspacePath =
+      normalizeOptionalValue(input.workspacePath) ??
+      snapshot.workspaces.find((entry) => entry.id === input.workspaceId)?.path;
+  }
+
   const resolvedWorkspaceId =
     input.workspaceId || (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : null);
   assertAgentIdAvailable(snapshot, agentId, resolvedWorkspaceId);
@@ -3149,7 +3170,8 @@ export async function createAgent(input: AgentCreateInput) {
     skillId: policySkillId,
     modelId: normalizeOptionalValue(input.modelId),
     isPrimary: false,
-    policy
+    policy,
+    channelIds: input.channelIds ?? []
   });
 
   snapshotCache = null;
@@ -3167,8 +3189,13 @@ export async function updateAgent(input: AgentUpdateInput) {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const agent = snapshot.agents.find((entry) => entry.id === agentId);
+  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
+  let agent = snapshot.agents.find((entry) => entry.id === agentId);
+
+  if (!agent) {
+    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    agent = snapshot.agents.find((entry) => entry.id === agentId);
+  }
 
   if (!agent) {
     throw new Error("Agent was not found.");
@@ -3241,7 +3268,8 @@ export async function updateAgent(input: AgentUpdateInput) {
     enabled: true,
     modelId: normalizeOptionalValue(input.modelId) ?? (agent.modelId === "unassigned" ? null : agent.modelId),
     isPrimary: agent.isDefault,
-    policy
+    policy,
+    channelIds: input.channelIds ?? []
   });
 
   snapshotCache = null;
@@ -3259,8 +3287,13 @@ export async function deleteAgent(input: AgentDeleteInput) {
     throw new Error("Agent id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const agent = snapshot.agents.find((entry) => entry.id === agentId);
+  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
+  let agent = snapshot.agents.find((entry) => entry.id === agentId);
+
+  if (!agent) {
+    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    agent = snapshot.agents.find((entry) => entry.id === agentId);
+  }
 
   if (!agent) {
     throw new Error("Agent was not found.");
@@ -3304,6 +3337,334 @@ export async function deleteAgent(input: AgentDeleteInput) {
     workspacePath: agent.workspacePath,
     deletedRuntimeCount: runtimeCount
   };
+}
+
+export async function upsertWorkspaceChannel(input: {
+  workspaceId: string;
+  workspacePath: string;
+  channelId: string;
+  type: PlannerChannelType;
+  name: string;
+  primaryAgentId?: string | null;
+  agentIds?: string[];
+  groupAssignments?: WorkspaceChannelGroupAssignment[];
+}) {
+  const channelId = slugify(input.channelId.trim());
+
+  if (!channelId) {
+    throw new Error("Channel id is required.");
+  }
+
+  await mutateChannelRegistry((registry) => {
+    const existingChannel = registry.channels.find((entry) => entry.id === channelId);
+    const nextChannel: WorkspaceChannelSummary =
+      existingChannel ??
+      ({
+        id: channelId,
+        type: input.type,
+        name: input.name.trim() || channelId,
+        primaryAgentId: normalizeOptionalValue(input.primaryAgentId) ?? null,
+        workspaces: []
+      } satisfies WorkspaceChannelSummary);
+    const workspaceId = input.workspaceId.trim();
+    const workspacePath = input.workspacePath.trim();
+    const workspaceBinding =
+      nextChannel.workspaces.find((entry) => entry.workspaceId === workspaceId) ??
+      ({
+        workspaceId,
+        workspacePath,
+        agentIds: [],
+        groupAssignments: []
+      } satisfies WorkspaceChannelWorkspaceBinding);
+    const nextAgentIds = uniqueStrings([
+      ...workspaceBinding.agentIds,
+      ...(input.agentIds ?? []).map((entry) => entry.trim()).filter(Boolean)
+    ]);
+    const nextGroupAssignments = uniqueByChatId([
+      ...workspaceBinding.groupAssignments,
+      ...(input.groupAssignments ?? []).filter((assignment) => Boolean(assignment.chatId))
+    ]);
+
+    const mergedWorkspaceBinding: WorkspaceChannelWorkspaceBinding = {
+      ...workspaceBinding,
+      workspacePath,
+      agentIds: nextAgentIds,
+      groupAssignments: nextGroupAssignments
+    };
+
+    const workspaceBindings = nextChannel.workspaces.filter((entry) => entry.workspaceId !== workspaceId);
+    workspaceBindings.push(mergedWorkspaceBinding);
+
+    const nextPrimaryAgentId = normalizeOptionalValue(input.primaryAgentId) ?? nextChannel.primaryAgentId;
+
+    registry.channels = [
+      ...registry.channels.filter((entry) => entry.id !== channelId),
+      {
+        ...nextChannel,
+        id: channelId,
+        type: input.type,
+        name: input.name.trim() || nextChannel.name || channelId,
+        primaryAgentId:
+          nextPrimaryAgentId ||
+          mergedWorkspaceBinding.agentIds[0] ||
+          mergedWorkspaceBinding.groupAssignments.find((assignment) => assignment.agentId)?.agentId ||
+          null,
+        workspaces: workspaceBindings
+      }
+    ];
+  });
+
+  snapshotCache = null;
+  return getChannelRegistry();
+}
+
+export async function disconnectWorkspaceChannel(input: {
+  workspaceId: string;
+  channelId: string;
+}) {
+  const channelId = slugify(input.channelId.trim());
+  if (!channelId) {
+    throw new Error("Channel id is required.");
+  }
+
+  await mutateChannelRegistry((registry) => {
+    registry.channels = registry.channels
+      .map((channel) => {
+        if (channel.id !== channelId) {
+          return channel;
+        }
+
+        const workspaceBindings = channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId);
+        const remainingCandidates = uniqueStrings([
+          ...workspaceBindings.flatMap((binding) => binding.agentIds),
+          ...workspaceBindings.flatMap((binding) =>
+            binding.groupAssignments
+              .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+              .map((assignment) => assignment.agentId as string)
+          )
+        ]);
+
+        return {
+          ...channel,
+          primaryAgentId: channel.primaryAgentId && remainingCandidates.includes(channel.primaryAgentId)
+            ? channel.primaryAgentId
+            : remainingCandidates[0] ?? null,
+          workspaces: workspaceBindings
+        };
+      })
+      .filter((channel) => channel.workspaces.length > 0 || channel.primaryAgentId);
+  });
+
+  snapshotCache = null;
+  return getChannelRegistry();
+}
+
+export async function deleteWorkspaceChannelEverywhere(input: {
+  channelId: string;
+}) {
+  const channelId = slugify(input.channelId.trim());
+  if (!channelId) {
+    throw new Error("Channel id is required.");
+  }
+
+  const registry = await readChannelRegistry();
+  const channel = registry.channels.find((entry) => entry.id === channelId);
+
+  if (!channel) {
+    throw new Error("Channel was not found.");
+  }
+
+  const removedGroupIds = uniqueStrings(
+    channel.workspaces.flatMap((workspace) =>
+      workspace.groupAssignments
+        .filter((assignment) => Boolean(assignment.chatId))
+        .map((assignment) => assignment.chatId)
+    )
+  );
+  const workspacePaths = uniqueStrings(channel.workspaces.map((workspace) => workspace.workspacePath));
+
+  if (channel.type !== "internal") {
+    await runOpenClaw(
+      ["channels", "remove", "--channel", channel.type, "--account", channelId, "--delete"],
+      { timeoutMs: 60000 }
+    );
+  }
+
+  await mutateChannelRegistry(
+    (nextRegistry) => {
+      nextRegistry.channels = nextRegistry.channels.filter((entry) => entry.id !== channelId);
+    },
+    {
+      removedAccountIds: [channelId],
+      removedGroupIds
+    }
+  );
+
+  await Promise.all(workspacePaths.map((workspacePath) => removeWorkspaceProjectChannelReferences(workspacePath, channelId)));
+
+  snapshotCache = null;
+  return getChannelRegistry();
+}
+
+export async function setWorkspaceChannelPrimary(input: {
+  channelId: string;
+  primaryAgentId: string | null;
+}) {
+  const channelId = slugify(input.channelId.trim());
+  if (!channelId) {
+    throw new Error("Channel id is required.");
+  }
+
+  await mutateChannelRegistry((registry) => {
+    const channel = registry.channels.find((entry) => entry.id === channelId);
+    if (!channel) {
+      throw new Error("Channel was not found.");
+    }
+
+    channel.primaryAgentId = normalizeOptionalValue(input.primaryAgentId) ?? null;
+  });
+
+  snapshotCache = null;
+  return getChannelRegistry();
+}
+
+export async function setWorkspaceChannelGroups(input: {
+  channelId: string;
+  workspaceId: string;
+  groupAssignments: WorkspaceChannelGroupAssignment[];
+}) {
+  const channelId = slugify(input.channelId.trim());
+  if (!channelId) {
+    throw new Error("Channel id is required.");
+  }
+
+  await mutateChannelRegistry((registry) => {
+    const channel = registry.channels.find((entry) => entry.id === channelId);
+    if (!channel) {
+      throw new Error("Channel was not found.");
+    }
+
+    const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+    if (!workspace) {
+      throw new Error("Workspace binding was not found for this channel.");
+    }
+
+    workspace.groupAssignments = uniqueByChatId(
+      input.groupAssignments.map((assignment) => ({
+        chatId: assignment.chatId.trim(),
+        agentId: normalizeOptionalValue(assignment.agentId) ?? null,
+        title: normalizeOptionalValue(assignment.title) ?? null,
+        enabled: assignment.enabled !== false
+      }))
+    );
+    workspace.agentIds = uniqueStrings([
+      ...workspace.agentIds,
+      ...workspace.groupAssignments
+        .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+        .map((assignment) => assignment.agentId as string)
+    ]);
+  });
+
+  snapshotCache = null;
+  return getChannelRegistry();
+}
+
+export async function bindWorkspaceChannelAgent(input: {
+  channelId: string;
+  workspaceId: string;
+  workspacePath: string;
+  agentId: string;
+}) {
+  const channelId = slugify(input.channelId.trim());
+  const agentId = slugify(input.agentId.trim());
+  if (!channelId || !agentId) {
+    throw new Error("Channel id and agent id are required.");
+  }
+
+  await mutateChannelRegistry((registry) => {
+    const channel = registry.channels.find((entry) => entry.id === channelId);
+    if (!channel) {
+      throw new Error("Channel was not found.");
+    }
+
+    const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+    const nextWorkspace: WorkspaceChannelWorkspaceBinding =
+      workspace ??
+      ({
+        workspaceId: input.workspaceId,
+        workspacePath: input.workspacePath,
+        agentIds: [],
+        groupAssignments: []
+      } satisfies WorkspaceChannelWorkspaceBinding);
+
+    nextWorkspace.agentIds = uniqueStrings([...nextWorkspace.agentIds, agentId]);
+    nextWorkspace.workspacePath = input.workspacePath;
+    channel.workspaces = [
+      ...channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId),
+      nextWorkspace
+    ];
+
+    if (!channel.primaryAgentId) {
+      channel.primaryAgentId = agentId;
+    }
+  });
+
+  snapshotCache = null;
+  return getChannelRegistry();
+}
+
+export async function unbindWorkspaceChannelAgent(input: {
+  channelId: string;
+  workspaceId: string;
+  agentId: string;
+}) {
+  const channelId = slugify(input.channelId.trim());
+  const agentId = slugify(input.agentId.trim());
+  if (!channelId || !agentId) {
+    throw new Error("Channel id and agent id are required.");
+  }
+
+  await mutateChannelRegistry((registry) => {
+    const channel = registry.channels.find((entry) => entry.id === channelId);
+    if (!channel) {
+      throw new Error("Channel was not found.");
+    }
+
+    const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+    if (!workspace) {
+      return;
+    }
+
+    workspace.agentIds = workspace.agentIds.filter((entry) => entry !== agentId);
+    workspace.groupAssignments = workspace.groupAssignments.filter((assignment) => assignment.agentId !== agentId);
+
+    if (channel.primaryAgentId === agentId) {
+      const fallbackAgent =
+        workspace.agentIds[0] ??
+        workspace.groupAssignments.find((assignment) => assignment.enabled !== false && assignment.agentId)?.agentId ??
+        channel.workspaces
+          .flatMap((binding) => binding.agentIds)
+          .find((candidate) => candidate !== agentId) ??
+        channel.workspaces
+          .flatMap((binding) => binding.groupAssignments)
+          .find((assignment) => assignment.enabled !== false && assignment.agentId && assignment.agentId !== agentId)
+          ?.agentId ??
+        null;
+      channel.primaryAgentId = fallbackAgent;
+    }
+
+    channel.workspaces = [
+      ...channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId),
+      {
+        ...workspace,
+        agentIds: workspace.agentIds,
+        groupAssignments: workspace.groupAssignments
+      }
+    ];
+  });
+
+  snapshotCache = null;
+  return getChannelRegistry();
 }
 
 export async function createWorkspaceProject(
@@ -3564,7 +3925,8 @@ function createWorkspaceProjectFromEditSeed(seed: WorkspaceEditSeed): WorkspaceP
       skills: [],
       tools: [],
       workspaceOnlyAgentCount: 0
-    }
+    },
+    channels: []
   };
 }
 
@@ -3839,7 +4201,8 @@ async function syncWorkspaceAgentsToPlan(input: {
         theme: normalizeOptionalValue(desiredAgent.theme) ?? currentAgent.identity.theme,
         modelId: normalizeOptionalValue(desiredAgent.modelId) ?? (currentAgent.modelId === "unassigned" ? undefined : currentAgent.modelId),
         policy: desiredAgent.policy,
-        heartbeat: desiredAgent.heartbeat
+        heartbeat: desiredAgent.heartbeat,
+        channelIds: desiredAgent.channelIds
       });
       continue;
     }
@@ -3853,7 +4216,8 @@ async function syncWorkspaceAgentsToPlan(input: {
       theme: normalizeOptionalValue(desiredAgent.theme) ?? undefined,
       modelId: normalizeOptionalValue(desiredAgent.modelId) ?? undefined,
       policy: desiredAgent.policy,
-      heartbeat: desiredAgent.heartbeat
+      heartbeat: desiredAgent.heartbeat,
+      channelIds: desiredAgent.channelIds
     });
 
     matchedAgentIds.add(createdAgentId.agentId);
@@ -6991,6 +7355,7 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
               (currentAgent?.modelId && currentAgent.modelId !== "unassigned" ? currentAgent.modelId : undefined),
             isPrimary: entry.isPrimary,
             policy: resolvedPolicy,
+            channelIds: entry.channelIds ?? [],
             heartbeat: {
               enabled: currentAgent?.heartbeat.enabled ?? false,
               ...(currentAgent?.heartbeat.every ? { every: currentAgent.heartbeat.every } : {})
@@ -7105,7 +7470,8 @@ function areWorkspaceAgentsEqual(
           enabled: agent.heartbeat.enabled,
           every: normalizeOptionalValue(agent.heartbeat.every) ?? null
         }
-      : null
+      : null,
+    channelIds: uniqueStrings(agent.channelIds ?? []).sort((left, right) => left.localeCompare(right))
   });
 
   const sortById = (leftAgent: WorkspaceAgentBlueprintInput, rightAgent: WorkspaceAgentBlueprintInput) =>
@@ -7229,6 +7595,11 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
           .map((entry) => parseWorkspaceProjectManifestAgent(entry))
           .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
       : [];
+    const channels = Array.isArray(parsed.channels)
+      ? parsed.channels
+          .map((entry) => parseWorkspaceProjectManifestChannel(entry))
+          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
+      : [];
     const rules = parseWorkspaceCreateRules(parsed.rules);
 
     return {
@@ -7242,7 +7613,8 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
       rules,
       hidden: parsed.hidden === true,
       systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
-      agents
+      agents,
+      channels
     };
   } catch {
     return {
@@ -7256,9 +7628,101 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
       rules: null,
       hidden: false,
       systemTag: null,
-      agents: []
+      agents: [],
+      channels: []
     };
   }
+}
+
+async function readChannelRegistry() {
+  try {
+    const raw = await readFile(channelRegistryPath, "utf8");
+    const candidate = JSON.parse(raw);
+    const parsed = isObjectRecord(candidate) ? candidate : {};
+    const channels = Array.isArray(parsed.channels)
+      ? parsed.channels
+          .map((entry) => parseWorkspaceChannelSummary(entry))
+          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
+      : [];
+
+    return normalizeChannelRegistry({
+      version: 1 as const,
+      channels
+    } satisfies ChannelRegistry);
+  } catch {
+    return normalizeChannelRegistry({
+      version: 1 as const,
+      channels: []
+    } satisfies ChannelRegistry);
+  }
+}
+
+async function readChannelAccounts() {
+  try {
+    const channels = await runOpenClawJson<Record<string, Record<string, unknown>>>([
+      "config",
+      "get",
+      "channels",
+      "--json"
+    ]);
+
+    return Object.entries(channels).flatMap(([type, config]) => {
+      const accounts = isObjectRecord(config?.accounts) ? (config.accounts as Record<string, unknown>) : {};
+
+      return Object.entries(accounts).flatMap(([accountId, account]) => {
+        if (!isPlannerChannelTypeValue(type)) {
+          return [];
+        }
+
+        const accountRecord = isObjectRecord(account) ? (account as Record<string, unknown>) : {};
+
+        return [
+          {
+            id: accountId,
+            type,
+            name: typeof accountRecord.name === "string" ? accountRecord.name : accountId,
+            enabled: accountRecord.enabled !== false
+          }
+        ] satisfies ChannelAccountRecord[];
+      });
+    });
+  } catch {
+    return [] as ChannelAccountRecord[];
+  }
+}
+
+async function writeChannelRegistry(registry: ChannelRegistry) {
+  await writeTextFileEnsured(channelRegistryPath, `${JSON.stringify(registry, null, 2)}\n`);
+}
+
+export async function getChannelRegistry() {
+  return readChannelRegistry();
+}
+
+export async function createTelegramChannelAccount(input: { name: string; token: string }) {
+  const before = new Set(
+    (await readChannelAccounts())
+      .filter((account) => account.type === "telegram")
+      .map((account) => account.id)
+  );
+
+  await runOpenClaw(
+    ["channels", "add", "--channel", "telegram", "--token", input.token, "--name", input.name],
+    { timeoutMs: 60000 }
+  );
+
+  const after = (await readChannelAccounts()).filter((account) => account.type === "telegram");
+  const created =
+    after.find((account) => !before.has(account.id) && account.name === input.name) ??
+    after.find((account) => !before.has(account.id)) ??
+    after.find((account) => account.name === input.name) ??
+    null;
+
+  if (!created) {
+    throw new Error("Telegram channel could not be resolved after provisioning.");
+  }
+
+  return created;
 }
 
 async function upsertWorkspaceProjectAgentMetadata(
@@ -7274,6 +7738,7 @@ async function upsertWorkspaceProjectAgentMetadata(
     skillId?: string | null;
     modelId?: string | null;
     policy: AgentPolicy;
+    channelIds?: string[];
   }
 ) {
   const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
@@ -7306,6 +7771,10 @@ async function upsertWorkspaceProjectAgentMetadata(
     skillId: agent.skillId ?? existingAgent?.skillId ?? null,
     modelId: agent.modelId ?? existingAgent?.modelId ?? null,
     policy: agent.policy
+    ,
+    channelIds: Array.isArray(agent.channelIds)
+      ? Array.from(new Set(agent.channelIds.filter((entry) => typeof entry === "string" && entry.trim())))
+      : existingAgent?.channelIds ?? []
   };
   const agents = Array.isArray(parsed.agents)
     ? parsed.agents.filter((entry) => isObjectRecord(entry) && typeof entry.id === "string" && entry.id !== agent.id)
@@ -7359,6 +7828,54 @@ async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentI
   await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
+async function removeWorkspaceProjectChannelReferences(workspacePath: string, channelId: string) {
+  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
+  let parsed: Record<string, unknown> = {};
+
+  try {
+    const raw = await readFile(projectFilePath, "utf8");
+    const candidate = JSON.parse(raw);
+    parsed = isObjectRecord(candidate) ? candidate : {};
+  } catch {
+    return;
+  }
+
+  if (!Array.isArray(parsed.agents)) {
+    return;
+  }
+
+  let didChange = false;
+  const nextAgents = parsed.agents.map((entry) => {
+    if (!isObjectRecord(entry) || typeof entry.id !== "string") {
+      return entry;
+    }
+
+    const currentChannelIds = Array.isArray(entry.channelIds)
+      ? entry.channelIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const nextChannelIds = currentChannelIds.filter((entry) => entry !== channelId);
+
+    if (nextChannelIds.length === currentChannelIds.length) {
+      return entry;
+    }
+
+    didChange = true;
+    return {
+      ...entry,
+      channelIds: nextChannelIds
+    };
+  });
+
+  if (!didChange) {
+    return;
+  }
+
+  parsed.updatedAt = new Date().toISOString();
+  parsed.agents = nextAgents;
+
+  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
+}
+
 async function pathMatchesKind(targetPath: string, kind: "file" | "directory") {
   try {
     const targetStat = await stat(targetPath);
@@ -7401,8 +7918,293 @@ function parseWorkspaceProjectManifestAgent(value: unknown): WorkspaceProjectMan
     modelId: typeof value.modelId === "string" ? value.modelId : null,
     emoji: typeof value.emoji === "string" ? value.emoji : null,
     theme: typeof value.theme === "string" ? value.theme : null,
-    policy: parseAgentPolicy(value.policy)
+    policy: parseAgentPolicy(value.policy),
+    channelIds: Array.isArray(value.channelIds)
+      ? value.channelIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
+      : []
   };
+}
+
+function parseWorkspaceProjectManifestChannel(value: unknown): WorkspaceChannelSummary | null {
+  return parseWorkspaceChannelSummary(value);
+}
+
+function parseWorkspaceChannelSummary(value: unknown): WorkspaceChannelSummary | null {
+  if (!isObjectRecord(value) || typeof value.id !== "string") {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    type: isPlannerChannelTypeValue(value.type) ? value.type : "internal",
+    name: typeof value.name === "string" ? value.name : value.id,
+    primaryAgentId: typeof value.primaryAgentId === "string" ? value.primaryAgentId : null,
+    workspaces: Array.isArray(value.workspaces)
+      ? value.workspaces
+          .map((entry) => parseWorkspaceChannelWorkspaceBinding(entry))
+          .filter((entry): entry is WorkspaceChannelWorkspaceBinding => Boolean(entry))
+      : []
+  };
+}
+
+function isPlannerChannelTypeValue(value: unknown): value is PlannerChannelType {
+  return value === "internal" || value === "slack" || value === "telegram" || value === "discord" || value === "googlechat";
+}
+
+function parseWorkspaceChannelWorkspaceBinding(value: unknown): WorkspaceChannelWorkspaceBinding | null {
+  if (!isObjectRecord(value) || typeof value.workspaceId !== "string" || typeof value.workspacePath !== "string") {
+    return null;
+  }
+
+  return {
+    workspaceId: value.workspaceId,
+    workspacePath: value.workspacePath,
+    agentIds: Array.isArray(value.agentIds)
+      ? value.agentIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
+      : [],
+    groupAssignments: Array.isArray(value.groupAssignments)
+      ? value.groupAssignments
+          .map((entry) => parseWorkspaceChannelGroupAssignment(entry))
+          .filter((entry): entry is WorkspaceChannelGroupAssignment => Boolean(entry))
+      : []
+  };
+}
+
+function parseWorkspaceChannelGroupAssignment(value: unknown): WorkspaceChannelGroupAssignment | null {
+  if (!isObjectRecord(value) || typeof value.chatId !== "string") {
+    return null;
+  }
+
+  return {
+    chatId: value.chatId,
+    agentId: typeof value.agentId === "string" ? value.agentId : null,
+    title: typeof value.title === "string" ? value.title : null,
+    enabled: value.enabled !== false
+  };
+}
+
+function normalizeChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
+  const channels = registry.channels
+    .map((channel) => ({
+      id: channel.id.trim(),
+      type: isPlannerChannelTypeValue(channel.type) ? channel.type : "internal",
+      name: channel.name.trim() || channel.id.trim(),
+      primaryAgentId: normalizeOptionalValue(channel.primaryAgentId) ?? null,
+      workspaces: channel.workspaces
+        .map((workspace) => ({
+          workspaceId: workspace.workspaceId.trim(),
+          workspacePath: workspace.workspacePath.trim(),
+          agentIds: uniqueStrings(workspace.agentIds.map((agentId) => agentId.trim()).filter(Boolean)),
+          groupAssignments: workspace.groupAssignments
+            .map((assignment) => ({
+              chatId: assignment.chatId.trim(),
+              agentId: normalizeOptionalValue(assignment.agentId) ?? null,
+              title: normalizeOptionalValue(assignment.title) ?? null,
+              enabled: assignment.enabled !== false
+            }))
+            .filter((assignment) => Boolean(assignment.chatId))
+        }))
+        .filter((workspace) => Boolean(workspace.workspaceId) && Boolean(workspace.workspacePath))
+    }))
+    .filter((channel) => Boolean(channel.id));
+
+  const deduped = new Map<string, WorkspaceChannelSummary>();
+
+  for (const channel of channels) {
+    const existing = deduped.get(channel.id);
+
+    if (!existing) {
+      deduped.set(channel.id, {
+        ...channel,
+        workspaces: channel.workspaces
+      });
+      continue;
+    }
+
+    const workspaceMap = new Map<string, WorkspaceChannelWorkspaceBinding>();
+    for (const workspace of existing.workspaces) {
+      workspaceMap.set(workspace.workspaceId, workspace);
+    }
+
+    for (const workspace of channel.workspaces) {
+      const current = workspaceMap.get(workspace.workspaceId);
+
+      if (!current) {
+        workspaceMap.set(workspace.workspaceId, workspace);
+        continue;
+      }
+
+      workspaceMap.set(workspace.workspaceId, {
+        ...current,
+        agentIds: uniqueStrings([...current.agentIds, ...workspace.agentIds]),
+        groupAssignments: uniqueByChatId([...current.groupAssignments, ...workspace.groupAssignments])
+      });
+    }
+
+    deduped.set(channel.id, {
+      ...existing,
+      name: existing.name || channel.name,
+      primaryAgentId: existing.primaryAgentId || channel.primaryAgentId,
+      workspaces: Array.from(workspaceMap.values())
+    });
+  }
+
+  return {
+    version: 1,
+    channels: Array.from(deduped.values())
+  };
+}
+
+function uniqueByChatId(assignments: WorkspaceChannelGroupAssignment[]) {
+  const seen = new Map<string, WorkspaceChannelGroupAssignment>();
+
+  for (const assignment of assignments) {
+    if (!assignment.chatId) {
+      continue;
+    }
+
+    seen.set(assignment.chatId, assignment);
+  }
+
+  return Array.from(seen.values());
+}
+
+function cloneChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
+  return normalizeChannelRegistry({
+    version: 1,
+    channels: registry.channels.map((channel) => ({
+      ...channel,
+      workspaces: channel.workspaces.map((workspace) => ({
+        ...workspace,
+        agentIds: [...workspace.agentIds],
+        groupAssignments: workspace.groupAssignments.map((assignment) => ({ ...assignment }))
+      }))
+    }))
+  });
+}
+
+async function saveChannelRegistry(registry: ChannelRegistry) {
+  await writeChannelRegistry(normalizeChannelRegistry(registry));
+}
+
+type ManagedTelegramRoutingCleanup = {
+  removedAccountIds?: string[];
+  removedGroupIds?: string[];
+};
+
+async function updateManagedTelegramRouting(
+  registry: ChannelRegistry,
+  cleanup: ManagedTelegramRoutingCleanup = {}
+) {
+  const currentBindings = await runOpenClawJson<unknown[]>(["config", "get", "bindings", "--json"]).catch(
+    () => []
+  );
+
+  const managedChannels = registry.channels.filter((channel) => channel.type === "telegram");
+  const managedAccountIds = new Set(managedChannels.map((channel) => channel.id));
+  const removedAccountIds = new Set(cleanup.removedAccountIds ?? []);
+  const managedGroupIds = new Set(
+    managedChannels.flatMap((channel) =>
+      channel.workspaces.flatMap((workspace) =>
+        workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+          .map((assignment) => assignment.chatId)
+      )
+    )
+  );
+  const removedGroupIds = new Set(cleanup.removedGroupIds ?? []);
+  const nextBindings = [
+    ...currentBindings.filter((entry) => {
+      if (!isObjectRecord(entry)) {
+        return true;
+      }
+
+      const match = isObjectRecord(entry.match) ? entry.match : null;
+      if (!match || match.channel !== "telegram") {
+        return true;
+      }
+
+      if (
+        typeof match.accountId === "string" &&
+        (managedAccountIds.has(match.accountId) || removedAccountIds.has(match.accountId))
+      ) {
+        return false;
+      }
+
+      if (
+        isObjectRecord(match.peer) &&
+        typeof match.peer.id === "string" &&
+        (managedGroupIds.has(match.peer.id) || removedGroupIds.has(match.peer.id))
+      ) {
+        return false;
+      }
+
+      return true;
+    }),
+    ...managedChannels
+      .filter((channel) => Boolean(channel.primaryAgentId))
+      .map((channel) => ({
+        agentId: channel.primaryAgentId as string,
+        match: {
+          channel: "telegram",
+          accountId: channel.id
+        }
+      })),
+    ...managedChannels.flatMap((channel) =>
+      channel.workspaces.flatMap((workspace) =>
+        workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+          .map((assignment) => ({
+            agentId: assignment.agentId as string,
+            match: {
+              channel: "telegram",
+              accountId: channel.id,
+              peer: {
+                kind: "group",
+                id: assignment.chatId
+              }
+            }
+          }))
+      )
+    )
+  ];
+  await runOpenClaw([
+    "config",
+    "set",
+    "channels.telegram.enabled",
+    managedChannels.length > 0 ? "true" : "false",
+    "--strict-json"
+  ]);
+
+  const defaultAccountId =
+    managedChannels.find((channel) => Boolean(channel.primaryAgentId))?.id ??
+    managedChannels[0]?.id ??
+    null;
+
+  if (defaultAccountId) {
+    await runOpenClaw([
+      "config",
+      "set",
+      "channels.telegram.defaultAccount",
+      JSON.stringify(defaultAccountId),
+      "--strict-json"
+    ]);
+  } else {
+    await runOpenClaw(["config", "unset", "channels.telegram.defaultAccount"]).catch(() => {});
+  }
+
+  await runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"]);
+}
+
+async function mutateChannelRegistry(
+  mutate: (registry: ChannelRegistry) => void | Promise<void>,
+  cleanup: ManagedTelegramRoutingCleanup = {}
+) {
+  const registry = cloneChannelRegistry(await readChannelRegistry());
+  await mutate(registry);
+  await saveChannelRegistry(registry);
+  await updateManagedTelegramRouting(registry, cleanup);
+  snapshotCache = null;
 }
 
 function findMatchingWorkspaceAgent(
@@ -7695,7 +8497,8 @@ function ensureWorkspace(store: Map<string, WorkspaceProject>, workspacePath: st
       skills: [],
       tools: [],
       workspaceOnlyAgentCount: 0
-    }
+    },
+    channels: []
   };
 
   store.set(workspaceId, workspace);
@@ -8359,7 +9162,7 @@ function tokenizeVersion(value: string) {
     .map((part) => (/^\d+$/.test(part) ? Number(part) : part.toLowerCase()));
 }
 
-function normalizeOptionalValue(value: string | undefined) {
+function normalizeOptionalValue(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }

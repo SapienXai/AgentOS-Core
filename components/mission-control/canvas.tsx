@@ -21,6 +21,7 @@ import {
 
 import type {
   AgentNodeData,
+  MissionEdgeData,
   TaskNodeData,
   WorkspaceNodeData
 } from "@/components/mission-control/canvas-types";
@@ -35,6 +36,7 @@ import { cn } from "@/lib/utils";
 type WorkspaceCanvasNode = Node<WorkspaceNodeData, "workspace">;
 type AgentCanvasNode = Node<AgentNodeData, "agent">;
 type TaskCanvasNode = Node<TaskNodeData, "task">;
+type CanvasEdge = Edge<MissionEdgeData, "simplebezier">;
 type CanvasNode = WorkspaceCanvasNode | AgentCanvasNode | TaskCanvasNode;
 type PersistedNodePosition = {
   x: number;
@@ -59,6 +61,8 @@ export function MissionCanvas({
   activeWorkspaceId,
   selectedNodeId,
   focusedAgentId,
+  composerTargetAgentId,
+  isComposerActive,
   recentDispatchId,
   hiddenRuntimeIds,
   hiddenTaskKeys,
@@ -80,6 +84,8 @@ export function MissionCanvas({
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
   focusedAgentId: string | null;
+  composerTargetAgentId: string | null;
+  isComposerActive: boolean;
   recentDispatchId: string | null;
   hiddenRuntimeIds: string[];
   hiddenTaskKeys: string[];
@@ -98,7 +104,7 @@ export function MissionCanvas({
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null);
   const handledDispatchIdsRef = useRef<Set<string>>(new Set());
   const creationTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const persistedNodePositionsRef = useRef<PersistedNodePositionMap>({});
@@ -113,6 +119,8 @@ export function MissionCanvas({
     relativeTimeReferenceMs,
     activeWorkspaceId,
     focusedAgentId,
+    composerTargetAgentId,
+    isComposerActive,
     justCreatedTaskIds,
     hiddenRuntimeIds,
     hiddenTaskKeys,
@@ -130,7 +138,7 @@ export function MissionCanvas({
     emptyPersistedNodePositions
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initialGraph.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<CanvasEdge>(initialGraph.edges);
 
   useEffect(() => {
     const persistedPositions = readPersistedNodePositions();
@@ -182,6 +190,8 @@ export function MissionCanvas({
       relativeTimeReferenceMs,
       activeWorkspaceId,
       focusedAgentId,
+      composerTargetAgentId,
+      isComposerActive,
       justCreatedTaskIds,
       hiddenRuntimeIds,
       hiddenTaskKeys,
@@ -211,6 +221,8 @@ export function MissionCanvas({
     snapshot,
     activeWorkspaceId,
     focusedAgentId,
+    composerTargetAgentId,
+    isComposerActive,
     justCreatedTaskIds,
     hiddenRuntimeIds,
     hiddenTaskKeys,
@@ -234,7 +246,12 @@ export function MissionCanvas({
     setNodes((previousNodes) =>
       previousNodes.map((node) => {
         const nextSelected = node.id === selectedNodeId;
-        const nextZIndex = resolveNodeZIndex(node, selectedNodeId);
+        const nextZIndex = resolveNodeZIndex(
+          node,
+          selectedNodeId,
+          composerTargetAgentId,
+          isComposerActive
+        );
 
         if (Boolean(node.selected) === nextSelected && node.zIndex === nextZIndex) {
           return node;
@@ -247,7 +264,7 @@ export function MissionCanvas({
         };
       })
     );
-  }, [selectedNodeId, setNodes]);
+  }, [selectedNodeId, composerTargetAgentId, isComposerActive, setNodes]);
 
   useEffect(() => {
     if (!reactFlowRef.current) {
@@ -255,7 +272,32 @@ export function MissionCanvas({
     }
 
     const timeoutId = setTimeout(() => {
-      reactFlowRef.current?.fitView({
+      const reactFlow = reactFlowRef.current;
+
+      if (isComposerActive && composerTargetAgentId && reactFlow) {
+        const targetNode = reactFlow.getNode(composerTargetAgentId);
+
+        if (targetNode) {
+          const viewportHeight = containerRef.current?.clientHeight ?? 0;
+          const composerVerticalBiasPx = Math.min(
+            180,
+            Math.max(104, Math.round(viewportHeight * 0.13))
+          );
+          const currentZoom = Math.max(reactFlow.getZoom(), 0.94);
+
+          reactFlow.setCenter(
+            targetNode.position.x + (targetNode.width ?? 212) / 2,
+            targetNode.position.y + (targetNode.height ?? 220) / 2 + composerVerticalBiasPx / currentZoom,
+            {
+              zoom: currentZoom,
+              duration: 500
+            }
+          );
+          return;
+        }
+      }
+
+      reactFlow?.fitView({
         padding: focusedAgentId ? 0.2 : 0.14,
         duration: 500,
         maxZoom: focusedAgentId ? 1.05 : 0.9
@@ -263,7 +305,7 @@ export function MissionCanvas({
     }, 0);
 
     return () => clearTimeout(timeoutId);
-  }, [focusedAgentId]);
+  }, [focusedAgentId, composerTargetAgentId, isComposerActive]);
 
   useEffect(() => {
     if (!recentDispatchId || handledDispatchIdsRef.current.has(recentDispatchId)) {
@@ -395,6 +437,7 @@ export function MissionCanvas({
           reactFlowRef.current = instance;
         }}
         elevateNodesOnSelect={false}
+        autoPanOnNodeDrag={false}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={(_, node) => onSelectNode(node.id)}
@@ -428,6 +471,8 @@ function buildCanvasGraph(
   relativeTimeReferenceMs: number,
   activeWorkspaceId: string | null,
   focusedAgentId: string | null,
+  composerTargetAgentId: string | null,
+  isComposerActive: boolean,
   justCreatedTaskIds: string[],
   hiddenRuntimeIds: string[],
   hiddenTaskKeys: string[],
@@ -444,11 +489,14 @@ function buildCanvasGraph(
   onInspectTask: (task: TaskRecord, target: "overview" | "output" | "files") => void,
   persistedNodePositions: PersistedNodePositionMap
 ) {
+  const safeHiddenRuntimeIds = Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : [];
+  const safeHiddenTaskKeys = Array.isArray(hiddenTaskKeys) ? hiddenTaskKeys : [];
+  const safeLockedTaskKeys = Array.isArray(lockedTaskKeys) ? lockedTaskKeys : [];
   const focusedAgent = focusedAgentId
     ? snapshot.agents.find((agent) => agent.id === focusedAgentId)
     : null;
+  const isFocusMode = focusedAgent !== null && !isComposerActive;
   const focusWorkspaceId = focusedAgent?.workspaceId ?? null;
-  const isFocusMode = focusedAgent !== null;
   const visibleWorkspaces = isFocusMode
     ? snapshot.workspaces.filter((workspace) => workspace.id === focusWorkspaceId)
     : activeWorkspaceId
@@ -474,27 +522,30 @@ function buildCanvasGraph(
       : snapshot.tasks.filter((task) => task.workspaceId === workspace.id);
     const workspaceToggleTasks = isFocusMode
       ? []
-      : workspaceTaskRecords.filter((task) => !lockedTaskKeys.includes(task.key));
+      : workspaceTaskRecords.filter((task) => !safeLockedTaskKeys.includes(task.key));
     const workspaceTasks = isFocusMode
       ? workspaceTaskRecords
       : workspaceTaskRecords.filter(
-          (task) => !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
+          (task) => !isTaskHidden(task, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys)
         );
     const workspaceTaskCardsHidden =
       !isFocusMode &&
       workspaceToggleTasks.length > 0 &&
-      workspaceToggleTasks.every((task) => isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys));
+      workspaceToggleTasks.every((task) =>
+        isTaskHidden(task, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys)
+      );
     const groupX = (workspaceIndex % 2) * 1160 + 44;
     const groupY = Math.floor(workspaceIndex / 2) * 920 + 42;
     const agentX = groupX + 52;
     const taskX = groupX + 390;
-    let laneY = groupY + 118;
+  let laneY = groupY + 118;
 
     workspaceAgents.forEach((agent, agentIndex) => {
       const agentTasks = workspaceTasks
         .filter((task) => resolveTaskOwnerId(task) === agent.id)
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
       const agentY = laneY + agentIndex * 4;
+      const isComposerHighlightedAgent = isComposerActive && composerTargetAgentId === agent.id;
 
       contentNodes.push({
         id: agent.id,
@@ -506,12 +557,13 @@ function buildCanvasGraph(
           persistedNodePositions,
           toLegacyPersistedAgentPositionKey(agent.id)
         ),
-        zIndex: 10,
+        zIndex: isComposerHighlightedAgent ? 55 : 10,
         selected: false,
         data: {
           agent,
           emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
           focused: focusedAgentId === agent.id,
+          composerFocused: isComposerHighlightedAgent,
           relativeTimeReferenceMs,
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
@@ -550,7 +602,7 @@ function buildCanvasGraph(
             relativeTimeReferenceMs,
             pendingCreation: isBootstrapTask,
             justCreated: isJustCreatedTask,
-            locked: lockedTaskKeys.includes(task.key),
+            locked: safeLockedTaskKeys.includes(task.key),
             onReply: onReplyTask,
             onCopyPrompt: onCopyTaskPrompt,
             onHide: onHideTask,
@@ -590,11 +642,16 @@ function buildCanvasGraph(
   });
 
   const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes];
-  return { nodes, edges: buildEdgesForNodes(graphTasks, nodes) };
+  return { nodes, edges: buildEdgesForNodes(graphTasks, nodes, composerTargetAgentId, isComposerActive) };
 }
 
-function buildEdgesForNodes(tasks: TaskRecord[], nodes: CanvasNode[]) {
-  const edges: Edge[] = [];
+function buildEdgesForNodes(
+  tasks: TaskRecord[],
+  nodes: CanvasNode[],
+  composerTargetAgentId: string | null,
+  isComposerActive: boolean
+) {
+  const edges: CanvasEdge[] = [];
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
   for (const task of tasks) {
@@ -617,9 +674,19 @@ function buildEdgesForNodes(tasks: TaskRecord[], nodes: CanvasNode[]) {
       targetHandle: "target-left",
       type: "simplebezier",
       zIndex: 4,
-      animated: task.status === "running",
+      animated: task.status === "running" || (isComposerActive && task.primaryAgentId === composerTargetAgentId),
+      data: {
+        composerFocused: isComposerActive && task.primaryAgentId === composerTargetAgentId
+      },
       style: {
-        strokeWidth: task.status === "running" ? 2.95 : 2.25
+        strokeWidth:
+          task.status === "running" && isComposerActive && task.primaryAgentId === composerTargetAgentId
+            ? 3.05
+            : task.status === "running"
+              ? 2.95
+              : isComposerActive && task.primaryAgentId === composerTargetAgentId
+                ? 2.8
+                : 2.25
       }
     });
   }
@@ -633,11 +700,15 @@ function isTaskHidden(
   hiddenTaskKeys: string[],
   lockedTaskKeys: string[]
 ) {
-  if (lockedTaskKeys.includes(task.key)) {
+  const safeHiddenRuntimeIds = Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : [];
+  const safeHiddenTaskKeys = Array.isArray(hiddenTaskKeys) ? hiddenTaskKeys : [];
+  const safeLockedTaskKeys = Array.isArray(lockedTaskKeys) ? lockedTaskKeys : [];
+
+  if (safeLockedTaskKeys.includes(task.key)) {
     return false;
   }
 
-  if (hiddenTaskKeys.includes(task.key)) {
+  if (safeHiddenTaskKeys.includes(task.key)) {
     return true;
   }
 
@@ -645,7 +716,7 @@ function isTaskHidden(
     return false;
   }
 
-  return task.runtimeIds.every((runtimeId) => hiddenRuntimeIds.includes(runtimeId));
+  return task.runtimeIds.every((runtimeId) => safeHiddenRuntimeIds.includes(runtimeId));
 }
 
 function resolveTaskOwnerId(task: TaskRecord) {
@@ -682,12 +753,29 @@ function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]
   });
 }
 
-function resolveNodeZIndex(node: CanvasNode, selectedNodeId: string | null) {
+function resolveNodeZIndex(
+  node: CanvasNode,
+  selectedNodeId: string | null,
+  composerTargetAgentId: string | null,
+  isComposerActive: boolean
+) {
   if (node.type === "workspace") {
     return 0;
   }
 
   if (node.type === "agent") {
+    if (isComposerActive && composerTargetAgentId === node.id && selectedNodeId === node.id) {
+      return 65;
+    }
+
+    if (selectedNodeId === node.id) {
+      return 60;
+    }
+
+    if (isComposerActive && composerTargetAgentId === node.id) {
+      return 55;
+    }
+
     return 10;
   }
 

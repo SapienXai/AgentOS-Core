@@ -240,7 +240,8 @@ export function createPlannerAgentSpec(
     policy: seed?.policy ?? resolveAgentPolicy("worker"),
     heartbeat: seed?.heartbeat ?? { enabled: false },
     responsibilities: normalizeList(seed?.responsibilities),
-    outputs: normalizeList(seed?.outputs)
+    outputs: normalizeList(seed?.outputs),
+    channelIds: normalizeList(seed?.channelIds)
   };
 }
 
@@ -276,6 +277,19 @@ export function createPlannerChannelSpec(
     enabled: seed?.enabled !== false,
     announce: Boolean(seed?.announce),
     requiresCredentials: channelTemplate.requiresCredentials,
+    accountId: seed?.accountId?.trim(),
+    primaryAgentId: seed?.primaryAgentId?.trim() ?? null,
+    allowedChatIds: normalizeList(seed?.allowedChatIds),
+    groupAssignments: Array.isArray(seed?.groupAssignments)
+      ? seed.groupAssignments
+          .map((assignment) => ({
+            chatId: typeof assignment.chatId === "string" ? assignment.chatId.trim() : "",
+            agentId: typeof assignment.agentId === "string" ? assignment.agentId.trim() : null,
+            title: typeof assignment.title === "string" ? assignment.title.trim() : null,
+            enabled: assignment.enabled !== false
+          }))
+          .filter((assignment) => Boolean(assignment.chatId))
+      : [],
     credentials:
       seed?.credentials?.map((credential) => ({
         ...credential,

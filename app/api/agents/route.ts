@@ -28,7 +28,8 @@ const createAgentSchema = z.object({
   theme: z.string().optional(),
   avatar: z.string().optional(),
   policy: agentPolicySchema.optional(),
-  heartbeat: heartbeatSchema.optional()
+  heartbeat: heartbeatSchema.optional(),
+  channelIds: z.array(z.string()).optional()
 });
 
 const updateAgentSchema = z.object({
@@ -40,7 +41,8 @@ const updateAgentSchema = z.object({
   theme: z.string().optional(),
   avatar: z.string().optional(),
   policy: agentPolicySchema.optional(),
-  heartbeat: heartbeatSchema.optional()
+  heartbeat: heartbeatSchema.optional(),
+  channelIds: z.array(z.string()).optional()
 });
 
 const deleteAgentSchema = z.object({

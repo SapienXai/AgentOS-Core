@@ -27,6 +27,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const [expanded, setExpanded] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const detailsPanelId = `agent-details-${data.agent.id}`;
+  const isAttentionActive = selected || data.composerFocused;
   const tone = toneForAgentStatus(data.agent.status);
   const dotTone =
     data.agent.status === "engaged"
@@ -80,19 +81,66 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   }, [menuOpen]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
+    <div
       className={cn(
-        "relative w-[212px] overflow-hidden rounded-[16px] border border-cyan-300/12 bg-[linear-gradient(180deg,rgba(15,24,40,0.94),rgba(8,13,24,0.94))] px-3 py-2.5 shadow-[0_16px_28px_rgba(0,0,0,0.26)] backdrop-blur-xl",
+        "agent-node relative isolate w-[212px] overflow-visible rounded-[16px] border border-cyan-300/12 bg-[linear-gradient(180deg,rgba(15,24,40,0.94),rgba(8,13,24,0.94))] px-3 py-2.5 shadow-[0_16px_28px_rgba(0,0,0,0.26)] backdrop-blur-xl",
         data.emphasis ? "opacity-100" : "opacity-72",
-        selected && "border-cyan-300/[0.45] shadow-[0_18px_42px_rgba(34,211,238,0.16)]"
+        selected && "border-cyan-300/[0.45] shadow-[0_18px_42px_rgba(34,211,238,0.16)]",
+        isAttentionActive && "border-cyan-200/[0.56] shadow-[0_20px_52px_rgba(34,211,238,0.24)]"
       )}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_36%),radial-gradient(circle_at_84%_18%,rgba(16,185,129,0.08),transparent_28%)]" />
       <div className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full bg-[linear-gradient(180deg,rgba(125,211,252,0.9),rgba(34,211,238,0.14))]" />
       <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-cyan-200/10" />
       <div className="pointer-events-none absolute right-2 top-2 h-10 w-10 rounded-full bg-cyan-300/10 blur-xl" />
+      {isAttentionActive ? (
+        <>
+          <div aria-hidden="true" className="agent-node__composer-glow pointer-events-none absolute inset-[-7px] z-0 rounded-[22px]" />
+          <svg
+            aria-hidden="true"
+            className="agent-node__composer-svg pointer-events-none absolute inset-[-4px] z-0 h-[calc(100%+8px)] w-[calc(100%+8px)] overflow-visible"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+          >
+            <rect
+              x="3.5"
+              y="3.5"
+              width="93"
+              height="93"
+              rx="16.5"
+              pathLength={100}
+              className="agent-node__composer-rail"
+            />
+            <rect
+              x="3.5"
+              y="3.5"
+              width="93"
+              height="93"
+              rx="16.5"
+              pathLength={100}
+              className="agent-node__composer-trace agent-node__composer-trace--glow"
+            />
+            <rect
+              x="3.5"
+              y="3.5"
+              width="93"
+              height="93"
+              rx="16.5"
+              pathLength={100}
+              className="agent-node__composer-trace agent-node__composer-trace--tail"
+            />
+            <rect
+              x="3.5"
+              y="3.5"
+              width="93"
+              height="93"
+              rx="16.5"
+              pathLength={100}
+              className="agent-node__composer-trace agent-node__composer-trace--core"
+            />
+          </svg>
+        </>
+      ) : null}
 
       <div className="relative z-10">
         <Handle
@@ -299,7 +347,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           ) : null}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 

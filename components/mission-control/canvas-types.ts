@@ -18,6 +18,7 @@ export type AgentNodeData = Record<string, unknown> & {
   agent: OpenClawAgent;
   emphasis: boolean;
   focused?: boolean;
+  composerFocused?: boolean;
   relativeTimeReferenceMs: number;
   onEdit?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
@@ -52,4 +53,8 @@ export type TaskNodeData = Record<string, unknown> & {
 export type ModelNodeData = Record<string, unknown> & {
   model: ModelRecord;
   emphasis: boolean;
+};
+
+export type MissionEdgeData = {
+  composerFocused?: boolean;
 };

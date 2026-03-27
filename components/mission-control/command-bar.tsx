@@ -72,8 +72,11 @@ export function CommandBar({
   activeWorkspaceId,
   selectedNodeId,
   composeIntent,
+  onTargetAgentChange,
+  onComposerActiveChange,
   onRefresh,
   onOpenWorkspaceCreate,
+  onOpenWorkspaceChannels,
   onMissionDispatchStart,
   onMissionDispatchFailure,
   onMissionResponse
@@ -82,8 +85,11 @@ export function CommandBar({
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
   composeIntent: ComposeIntent | null;
+  onTargetAgentChange?: (agentId: string | null) => void;
+  onComposerActiveChange?: (active: boolean) => void;
   onRefresh: () => Promise<void>;
   onOpenWorkspaceCreate: () => void;
+  onOpenWorkspaceChannels: () => void;
   onMissionDispatchStart: (event: MissionDispatchStart) => void;
   onMissionDispatchFailure: (requestId: string, message: string) => void;
   onMissionResponse: (result: MissionResponse, context: { requestId: string }) => void;
@@ -97,6 +103,7 @@ export function CommandBar({
   const [isComposerActive, setIsComposerActive] = useState(false);
   const [isDesktopLayout, setIsDesktopLayout] = useState(false);
   const [isDockHovered, setIsDockHovered] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const [composeSuggestion, setComposeSuggestion] = useState<ComposerSuggestion | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autoSelectionScopeRef = useRef<string | null>(null);
@@ -183,6 +190,10 @@ export function CommandBar({
   }, []);
 
   useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
     resizeTextarea(textareaRef.current);
   }, [mission]);
 
@@ -218,6 +229,14 @@ export function CommandBar({
       thinking
     });
   }, [draftScopeKey, mission, thinking]);
+
+  useEffect(() => {
+    onTargetAgentChange?.(effectiveTargetAgentId ?? null);
+  }, [effectiveTargetAgentId, onTargetAgentChange]);
+
+  useEffect(() => {
+    onComposerActiveChange?.(isComposerActive);
+  }, [isComposerActive, onComposerActiveChange]);
 
   useEffect(() => {
     if (!composeIntent) {
@@ -575,11 +594,11 @@ export function CommandBar({
               <div className="flex items-end justify-between gap-2.5 px-2.5 pb-2.5 pt-1.5">
                 <AnimatePresence initial={false}>
                   {showSuggestions ? (
-                    <motion.div
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 4 }}
-                      className="flex min-w-0 flex-wrap items-center gap-1.5"
+                      <motion.div
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        className="flex min-w-0 flex-wrap items-center gap-1.5"
                     >
                       {inlineSuggestions.map((suggestion) => (
                         <SuggestionChip
@@ -619,6 +638,15 @@ export function CommandBar({
                             </button>
                           }
                         />
+                      ) : null}
+                      {isMounted && targetWorkspace ? (
+                        <button
+                          type="button"
+                          onClick={onOpenWorkspaceChannels}
+                          className="inline-flex h-8 items-center rounded-full border border-cyan-300/18 bg-cyan-400/[0.1] px-3 text-[12px] text-cyan-50 transition-all hover:border-cyan-300/28 hover:bg-cyan-400/[0.14] hover:text-white"
+                        >
+                          Add Channel
+                        </button>
                       ) : null}
                     </motion.div>
                   ) : (

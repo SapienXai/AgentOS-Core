@@ -1,10 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
 import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
+import { ChannelBindingPicker } from "@/components/mission-control/channel-binding-picker";
 import { ProviderLogo } from "@/components/mission-control/provider-logo";
 import {
   AlertTriangle,
@@ -55,6 +56,10 @@ import {
   resolveHeartbeatDraft,
   type AgentHeartbeatDraft
 } from "@/lib/openclaw/agent-heartbeat";
+import {
+  getWorkspaceChannelIdsForAgent,
+  syncWorkspaceAgentChannelBindings
+} from "@/lib/openclaw/channel-bindings";
 import { compactPath, formatContextWindow, formatModelLabel, toneForHealth } from "@/lib/openclaw/presenters";
 import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
@@ -69,6 +74,7 @@ type AgentDraft = {
   avatar: string;
   policy: AgentPolicy;
   heartbeat: AgentHeartbeatDraft;
+  channelIds: string[];
 };
 
 type SidebarSectionId = "overview" | "workspaces" | "agents" | "models";
@@ -89,7 +95,8 @@ export function MissionSidebar({
   onConnectModelProvider,
   onOpenModelSetup,
   onOpenAddModels,
-  onEditWorkspace
+  onEditWorkspace,
+  onSnapshotChange
 }: {
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
@@ -120,6 +127,7 @@ export function MissionSidebar({
   onOpenModelSetup: () => void;
   onOpenAddModels: () => void;
   onEditWorkspace: (workspaceId: string) => void;
+  onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
 }) {
   const [isRailCollapsed, setIsRailCollapsed] = useState(false);
   const healthTone = toneForHealth(snapshot.diagnostics.health);
@@ -140,6 +148,7 @@ export function MissionSidebar({
   const [isDeleteAgentOpen, setIsDeleteAgentOpen] = useState(false);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
   const [editDraft, setEditDraft] = useState<AgentDraft | null>(null);
+  const [editChannelIdsBaseline, setEditChannelIdsBaseline] = useState<string[]>([]);
   const [workspaceDeleteTarget, setWorkspaceDeleteTarget] = useState<MissionControlSnapshot["workspaces"][number] | null>(null);
   const [workspaceDeleteConfirmText, setWorkspaceDeleteConfirmText] = useState("");
   const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
@@ -276,11 +285,45 @@ export function MissionSidebar({
     setIsDeleteWorkspaceOpen(true);
   };
 
-  const openDeleteAgent = (agent: MissionControlSnapshot["agents"][number]) => {
+  const openDeleteAgent = useCallback((agent: MissionControlSnapshot["agents"][number]) => {
     setAgentDeleteTarget(agent);
     setAgentDeleteConfirmText("");
     setIsDeleteAgentOpen(true);
+  }, []);
+
+  const handleEditAgentOpenChange = (nextOpen: boolean) => {
+    setIsEditAgentOpen(nextOpen);
+
+    if (!nextOpen) {
+      setEditDraft(null);
+      setEditChannelIdsBaseline([]);
+      setIsEditAgentAdvancedOpen(false);
+    }
   };
+
+  const openEditAgent = useCallback((agent: MissionControlSnapshot["agents"][number]) => {
+    const nextChannelIds = getWorkspaceChannelIdsForAgent(snapshot, agent.workspaceId, agent.id);
+
+    setEditDraft({
+      ...buildAgentDraft(agent.workspaceId, {
+        id: agent.id,
+        modelId: agent.modelId === "unassigned" ? "" : agent.modelId,
+        name: agent.name,
+        emoji: agent.identity.emoji ?? "",
+        theme: agent.identity.theme ?? "",
+        avatar: agent.identity.avatar ?? "",
+        policy: agent.policy,
+        heartbeat: resolveHeartbeatDraft(agent.policy.preset, {
+          enabled: agent.heartbeat.enabled,
+          every: agent.heartbeat.every ?? undefined
+        }),
+        channelIds: nextChannelIds
+      })
+    });
+    setEditChannelIdsBaseline(nextChannelIds);
+    setIsEditAgentAdvancedOpen(false);
+    setIsEditAgentOpen(true);
+  }, [snapshot]);
 
   useEffect(() => {
     if (!requestedAgentAction || handledRequestedAgentActionIdRef.current === requestedAgentAction.requestId) {
@@ -301,34 +344,16 @@ export function MissionSidebar({
     }
 
     openDeleteAgent(agent);
-  }, [requestedAgentAction, snapshot.agents]);
-
-  const openEditAgent = (agent: MissionControlSnapshot["agents"][number]) => {
-    setEditDraft({
-      ...buildAgentDraft(agent.workspaceId, {
-        id: agent.id,
-        modelId: agent.modelId === "unassigned" ? "" : agent.modelId,
-        name: agent.name,
-        emoji: agent.identity.emoji ?? "",
-        theme: agent.identity.theme ?? "",
-        avatar: agent.identity.avatar ?? "",
-        policy: agent.policy,
-        heartbeat: resolveHeartbeatDraft(agent.policy.preset, {
-          enabled: agent.heartbeat.enabled,
-          every: agent.heartbeat.every ?? undefined
-        })
-      })
-    });
-    setIsEditAgentAdvancedOpen(false);
-    setIsEditAgentOpen(true);
-  };
+  }, [requestedAgentAction, snapshot.agents, openDeleteAgent, openEditAgent]);
 
   const submitEditAgent = async () => {
     if (!editDraft) {
       return;
     }
 
+    const targetWorkspace = snapshot.workspaces.find((workspace) => workspace.id === editDraft.workspaceId) ?? null;
     setIsSavingAgent(true);
+    let succeeded = false;
 
     try {
       const response = await fetch("/api/agents", {
@@ -345,17 +370,32 @@ export function MissionSidebar({
         throw new Error(result.error || "OpenClaw could not update the agent.");
       }
 
-      toast.success("Agent updated in OpenClaw.", {
-        description: editDraft.id
-      });
-      setIsEditAgentOpen(false);
-      await onRefresh();
+      if (targetWorkspace) {
+        await syncWorkspaceAgentChannelBindings({
+          workspaceId: editDraft.workspaceId,
+          workspacePath: targetWorkspace.path,
+          agentId: editDraft.id,
+          currentChannelIds: editChannelIdsBaseline,
+          nextChannelIds: editDraft.channelIds,
+          onRegistryChange: onSnapshotChange
+        });
+      }
+
+      handleEditAgentOpenChange(false);
+      succeeded = true;
     } catch (error) {
       toast.error("Agent update failed.", {
         description: error instanceof Error ? error.message : "Unknown agent error."
       });
     } finally {
       setIsSavingAgent(false);
+    }
+
+    if (succeeded) {
+      void onRefresh().catch(() => {});
+      toast.success("Agent updated in OpenClaw.", {
+        description: editDraft.id
+      });
     }
   };
 
@@ -365,6 +405,8 @@ export function MissionSidebar({
     }
 
     setIsSavingWorkspace(true);
+    let succeeded = false;
+    let deletedWorkspacePath = workspaceDeleteTarget.path;
 
     try {
       const response = await fetch("/api/workspaces", {
@@ -388,20 +430,25 @@ export function MissionSidebar({
         throw new Error(result.error || "OpenClaw could not delete the workspace.");
       }
 
-      toast.success("Workspace deleted from OpenClaw.", {
-        description: result.workspacePath || workspaceDeleteTarget.path
-      });
       setIsDeleteWorkspaceOpen(false);
       setWorkspaceDeleteTarget(null);
       setWorkspaceDeleteConfirmText("");
       onSelectWorkspace(activeWorkspaceId === workspaceDeleteTarget.id ? null : activeWorkspaceId);
-      await onRefresh();
+      deletedWorkspacePath = result.workspacePath || workspaceDeleteTarget.path;
+      succeeded = true;
     } catch (error) {
       toast.error("Workspace deletion failed.", {
         description: error instanceof Error ? error.message : "Unknown workspace error."
       });
     } finally {
       setIsSavingWorkspace(false);
+    }
+
+    if (succeeded) {
+      void onRefresh().catch(() => {});
+      toast.success("Workspace deleted from OpenClaw.", {
+        description: deletedWorkspacePath
+      });
     }
   };
 
@@ -411,6 +458,8 @@ export function MissionSidebar({
     }
 
     setIsDeletingAgent(true);
+    let succeeded = false;
+    let deletedAgentId = agentDeleteTarget.id;
 
     try {
       const response = await fetch("/api/agents", {
@@ -433,25 +482,28 @@ export function MissionSidebar({
         throw new Error(result.error || "OpenClaw could not delete the agent.");
       }
 
-      toast.success("Agent deleted from OpenClaw.", {
-        description: result.agentId || agentDeleteTarget.id
-      });
-
       if (editDraft?.id === agentDeleteTarget.id) {
-        setIsEditAgentOpen(false);
-        setEditDraft(null);
+        handleEditAgentOpenChange(false);
       }
 
       setIsDeleteAgentOpen(false);
       setAgentDeleteTarget(null);
       setAgentDeleteConfirmText("");
-      await onRefresh();
+      deletedAgentId = result.agentId || agentDeleteTarget.id;
+      succeeded = true;
     } catch (error) {
       toast.error("Agent deletion failed.", {
         description: error instanceof Error ? error.message : "Unknown agent error."
       });
     } finally {
       setIsDeletingAgent(false);
+    }
+
+    if (succeeded) {
+      void onRefresh().catch(() => {});
+      toast.success("Agent deleted from OpenClaw.", {
+        description: deletedAgentId
+      });
     }
   };
 
@@ -743,6 +795,7 @@ export function MissionSidebar({
                           snapshot={snapshot}
                           defaultWorkspaceId={activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? null}
                           onRefresh={onRefresh}
+                          onSnapshotChange={onSnapshotChange}
                           trigger={
                             <Button
                               variant="secondary"
@@ -1213,7 +1266,7 @@ export function MissionSidebar({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isEditAgentOpen} onOpenChange={setIsEditAgentOpen}>
+      <Dialog open={isEditAgentOpen} onOpenChange={handleEditAgentOpenChange}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Edit OpenClaw agent</DialogTitle>
@@ -1356,6 +1409,24 @@ export function MissionSidebar({
                   placeholder="https://example.com/avatar.png"
                 />
               </FormField>
+
+              <ChannelBindingPicker
+                snapshot={snapshot}
+                workspaceId={editDraft.workspaceId}
+                channelIds={editDraft.channelIds}
+                agentId={editDraft.id}
+                isSaving={isSavingAgent}
+                onChange={(channelIds) =>
+                  setEditDraft((current) =>
+                    current
+                      ? {
+                          ...current,
+                          channelIds
+                        }
+                      : current
+                  )
+                }
+              />
 
               <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1531,7 +1602,7 @@ export function MissionSidebar({
           ) : null}
 
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setIsEditAgentOpen(false)}>
+            <Button variant="secondary" onClick={() => handleEditAgentOpenChange(false)}>
               Cancel
             </Button>
             <Button onClick={submitEditAgent} disabled={isSavingAgent || !editDraft}>
@@ -1540,6 +1611,7 @@ export function MissionSidebar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </>
   );
 }
@@ -1905,7 +1977,12 @@ function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): A
     theme: seed.theme ?? presetMeta.defaultTheme,
     avatar: seed.avatar ?? "",
     policy,
-    heartbeat
+    heartbeat,
+    channelIds: Array.from(
+      new Set(
+        (seed.channelIds ?? []).filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
+      )
+    )
   };
 }
 

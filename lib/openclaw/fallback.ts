@@ -68,6 +68,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       issues: [reason]
     },
     presence: [],
+    channelAccounts: [],
     workspaces: [
       {
         id: "workspace-demo",
@@ -111,7 +112,8 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
           skills: ["planning", "execution"],
           tools: ["fs.workspaceOnly"],
           workspaceOnlyAgentCount: 2
-        }
+        },
+        channels: []
       }
     ],
     agents: [
@@ -295,6 +297,10 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         label: "current run"
       }
     ],
+    channelRegistry: {
+      version: 1,
+      channels: []
+    },
     missionPresets: [
       "Plan a multi-agent release mission for the selected workspace.",
       "Stand up a builder, tester, and reviewer loop for the next milestone.",
