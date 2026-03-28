@@ -72,6 +72,7 @@ export function CommandBar({
   activeWorkspaceId,
   selectedNodeId,
   composeIntent,
+  isComposerActive,
   onTargetAgentChange,
   onComposerActiveChange,
   onRefresh,
@@ -85,6 +86,7 @@ export function CommandBar({
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
   composeIntent: ComposeIntent | null;
+  isComposerActive: boolean;
   onTargetAgentChange?: (agentId: string | null) => void;
   onComposerActiveChange?: (active: boolean) => void;
   onRefresh: () => Promise<void>;
@@ -100,7 +102,6 @@ export function CommandBar({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
-  const [isComposerActive, setIsComposerActive] = useState(false);
   const [isDesktopLayout, setIsDesktopLayout] = useState(false);
   const [isDockHovered, setIsDockHovered] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
@@ -233,10 +234,6 @@ export function CommandBar({
   useEffect(() => {
     onTargetAgentChange?.(effectiveTargetAgentId ?? null);
   }, [effectiveTargetAgentId, onTargetAgentChange]);
-
-  useEffect(() => {
-    onComposerActiveChange?.(isComposerActive);
-  }, [isComposerActive, onComposerActiveChange]);
 
   useEffect(() => {
     if (!composeIntent) {
@@ -511,11 +508,11 @@ export function CommandBar({
                 isComposerActive &&
                   "border-white/[0.14] bg-[linear-gradient(180deg,rgba(24,34,50,0.94),rgba(12,18,30,0.92))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
               )}
-              onFocusCapture={() => setIsComposerActive(true)}
+              onFocusCapture={() => onComposerActiveChange?.(true)}
               onBlurCapture={(event) => {
                 const nextTarget = event.relatedTarget;
                 if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                  setIsComposerActive(false);
+                  onComposerActiveChange?.(false);
                 }
               }}
             >

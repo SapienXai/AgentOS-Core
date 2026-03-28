@@ -127,6 +127,7 @@ export function MissionControlShell({
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [composerTargetAgentId, setComposerTargetAgentId] = useState<string | null>(null);
   const [isComposerActive, setIsComposerActive] = useState(false);
+  const [composerViewportResetNonce, setComposerViewportResetNonce] = useState(0);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTabId>("overview");
   const [lastMission, setLastMission] = useState<MissionResponse | null>(null);
   const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
@@ -218,6 +219,8 @@ export function MissionControlShell({
     setActiveInspectorTab(tab);
   }, []);
   const settingsRef = useRef<HTMLDivElement | null>(null);
+  const canvasNodeInteractionActiveRef = useRef(false);
+  const pendingComposerBlurRef = useRef(false);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
     (runtime) => runtime.status === "running" || runtime.status === "queued"
@@ -293,10 +296,59 @@ export function MissionControlShell({
     [selectNode, uiSnapshot.agents]
   );
 
+  const handleCanvasNodePointerDownCapture = useCallback(() => {
+    canvasNodeInteractionActiveRef.current = true;
+  }, []);
+
+  const handleComposerActiveChange = useCallback(
+    (active: boolean) => {
+      if (active) {
+        pendingComposerBlurRef.current = false;
+        setIsComposerActive(true);
+        return;
+      }
+
+      if (canvasNodeInteractionActiveRef.current) {
+        pendingComposerBlurRef.current = true;
+        return;
+      }
+
+      pendingComposerBlurRef.current = false;
+      setIsComposerActive(false);
+    },
+    []
+  );
+
   const handleResetFocus = useCallback(() => {
     setFocusedAgentId(null);
     selectNode(activeWorkspaceId ?? uiSnapshot.workspaces[0]?.id ?? null);
   }, [activeWorkspaceId, selectNode, uiSnapshot.workspaces]);
+
+  useEffect(() => {
+    const handlePointerUp = () => {
+      if (!canvasNodeInteractionActiveRef.current) {
+        return;
+      }
+
+      canvasNodeInteractionActiveRef.current = false;
+
+      if (!pendingComposerBlurRef.current) {
+        return;
+      }
+
+      pendingComposerBlurRef.current = false;
+      setIsComposerActive(false);
+      setComposerViewportResetNonce((current) => current + 1);
+    };
+
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, []);
 
   const openWorkspaceWizard = useCallback((mode: "basic" | "advanced" = "basic") => {
     setWorkspaceWizardEditId(null);
@@ -1632,6 +1684,7 @@ export function MissionControlShell({
             focusedAgentId={focusedAgentId}
             composerTargetAgentId={composerTargetAgentId}
             isComposerActive={isComposerActive}
+            composerViewportResetNonce={composerViewportResetNonce}
             recentDispatchId={recentDispatchId}
             hiddenRuntimeIds={hiddenRuntimeIds}
             hiddenTaskKeys={hiddenTaskKeys}
@@ -1731,6 +1784,7 @@ export function MissionControlShell({
             onSelectNode={(nodeId) => {
               selectNode(nodeId);
             }}
+            onCanvasNodePointerDownCapture={handleCanvasNodePointerDownCapture}
           />
         </div>
       </div>
@@ -1881,8 +1935,9 @@ export function MissionControlShell({
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
+            isComposerActive={isComposerActive}
             onTargetAgentChange={setComposerTargetAgentId}
-            onComposerActiveChange={setIsComposerActive}
+            onComposerActiveChange={handleComposerActiveChange}
             onRefresh={refresh}
             onOpenWorkspaceCreate={() => {
               openWorkspaceWizard("basic");

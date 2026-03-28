@@ -80,6 +80,7 @@ export function MissionCanvas({
   focusedAgentId,
   composerTargetAgentId,
   isComposerActive,
+  composerViewportResetNonce,
   recentDispatchId,
   hiddenRuntimeIds,
   hiddenTaskKeys,
@@ -95,6 +96,7 @@ export function MissionCanvas({
   onAbortTask,
   onInspectTask,
   onSelectNode,
+  onCanvasNodePointerDownCapture,
   className
 }: {
   snapshot: MissionControlSnapshot;
@@ -103,6 +105,7 @@ export function MissionCanvas({
   focusedAgentId: string | null;
   composerTargetAgentId: string | null;
   isComposerActive: boolean;
+  composerViewportResetNonce: number;
   recentDispatchId: string | null;
   hiddenRuntimeIds: string[];
   hiddenTaskKeys: string[];
@@ -118,6 +121,7 @@ export function MissionCanvas({
   onAbortTask: (task: TaskRecord) => void;
   onInspectTask: (task: TaskRecord, target: "overview" | "output" | "files") => void;
   onSelectNode: (nodeId: string) => void;
+  onCanvasNodePointerDownCapture?: () => void;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -128,6 +132,7 @@ export function MissionCanvas({
   const hasHydratedPersistedNodePositionsRef = useRef(false);
   const skipNextPersistRef = useRef(false);
   const shouldMergePositionsRef = useRef(false);
+  const lastComposerViewportResetNonceRef = useRef(composerViewportResetNonce);
   const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const [justCreatedTaskIds, setJustCreatedTaskIds] = useState<string[]>([]);
   const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
@@ -375,6 +380,13 @@ export function MissionCanvas({
       return;
     }
 
+    if (!isComposerActive && composerViewportResetNonce !== lastComposerViewportResetNonceRef.current) {
+      lastComposerViewportResetNonceRef.current = composerViewportResetNonce;
+      return;
+    }
+
+    lastComposerViewportResetNonceRef.current = composerViewportResetNonce;
+
     const timeoutId = setTimeout(() => {
       const reactFlow = reactFlowRef.current;
 
@@ -409,7 +421,7 @@ export function MissionCanvas({
     }, 0);
 
     return () => clearTimeout(timeoutId);
-  }, [focusedAgentId, composerTargetAgentId, isComposerActive]);
+  }, [focusedAgentId, composerTargetAgentId, isComposerActive, composerViewportResetNonce]);
 
   useEffect(() => {
     if (!recentDispatchId || handledDispatchIdsRef.current.has(recentDispatchId)) {
@@ -539,6 +551,15 @@ export function MissionCanvas({
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           reactFlowRef.current = instance;
+        }}
+        onPointerDownCapture={(event) => {
+          if (!(event.target instanceof Element)) {
+            return;
+          }
+
+          if (event.target.closest(".react-flow__node")) {
+            onCanvasNodePointerDownCapture?.();
+          }
         }}
         elevateNodesOnSelect={false}
         autoPanOnNodeDrag={false}
